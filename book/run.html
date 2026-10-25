@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>A motor dies, played back · the keel book</title>
+<meta name="description" content="A recorded OpenArm run in drydock, played back frame by frame: every CAN frame, every state and command keel published, every flag it raised, on one clock.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23151515'/%3E%3Cpolyline points='4,20 12,20 14,9 18,25 20,20 28,20' fill='none' stroke='%237cc0ea' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script src="theme.js"></script>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="viz.css">
+<style>
+  /* The run, played back: the stage on top, the transport stuck to the
+     bottom, the inspector at the side (a sheet on phones). Cobalt is keel's
+     side of the wire, copper drydock's, amber waiting, red a fault. */
+
+  body { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-bottom: 0; }
+  .frame { max-width: 1400px; }
+  .play { display: grid; gap: 16px; padding-top: 24px; }
+  .play-head { display: grid; gap: 10px; }
+  .play-head h1 { font-size: clamp(2rem, 5vw, 3.2rem); max-width: 24ch; }
+  .play-head .lede { font-size: 1.05rem; max-width: 70ch; }
+
+  .jumps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .jumps .note { margin-right: 4px; }
+  button.chip { cursor: pointer; font-size: 0.78rem; padding: 4px 10px; }
+  button.chip:hover { color: var(--ink); border-color: var(--ink); }
+  .chip.dock { color: var(--dock); border-color: var(--dock); }
+  .chip.fault { color: var(--fault); border-color: var(--fault); }
+
+  .play-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+  .stage-card { padding: 10px; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+  .stage-wrap { position: relative; min-width: 0; }
+  #stage { position: relative; min-height: 300px; min-width: 0; }
+  #stage svg { display: block; width: 100%; height: auto; }
+  #stage-over { position: absolute; inset: 0; pointer-events: none; }
+  .now { min-height: 3em; font-size: 0.95rem; border-left: 3px solid var(--accent); padding: 2px 0 2px 12px; max-width: none; }
+
+  .toast {
+    position: absolute; max-width: min(360px, calc(100% - 16px)); display: grid; gap: 2px;
+    background: var(--paper); border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0;
+    padding: 6px 10px; font-size: 0.82rem; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12); animation: toast-in 0.2s ease-out;
+  }
+  .toast .mono { font-size: 0.72rem; color: var(--muted); }
+  .toast.bad { border-left-color: var(--fault); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .side { display: grid; gap: 12px; position: sticky; top: 16px; }
+  .inspector { position: relative; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 14px; display: grid; gap: 10px; max-height: calc(100vh - 260px); overflow-y: auto; }
+  #insp-body { display: grid; gap: 10px; min-width: 0; }
+  #insp-body h3 { font-size: 1.02rem; font-family: var(--mono); padding-right: 28px; }
+  .insp-close { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border: 1px solid var(--rule); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+  .insp-close:hover { color: var(--ink); }
+  .inspector .sub { font-size: 0.85rem; color: var(--muted); }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 0.85rem; }
+  .kv dt { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); padding-top: 1px; }
+  .kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere; }
+  .kv dd.bad { color: var(--fault); font-weight: 600; }
+  .bits { display: flex; flex-wrap: wrap; gap: 2px; border-radius: 8px; overflow: hidden; }
+  .bits .field { display: grid; gap: 1px; padding: 5px 4px; min-width: 64px; text-align: center; background: var(--accent-soft); }
+  .bits .field.f1 { background: var(--paper); }
+  .bits.ans .field.f0 { background: var(--dock-soft); }
+  .bits code { font-size: 0.82rem; font-weight: 600; letter-spacing: 0.04em; }
+  .bits .fname { font-size: 0.64rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bits .fval { font: 0.66rem var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .said { margin: 0; padding-left: 1.4em; font: 0.76rem/1.5 var(--mono); max-height: 160px; overflow-y: auto; }
+  .btn.small { justify-self: start; padding: 5px 10px; font-size: 0.8rem; }
+
+  #stage-3d { position: absolute; }
+  #stage-3d canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  #stage-3d canvas:active { cursor: grabbing; }
+  .legend { display: grid; gap: 6px; font-size: 0.82rem; color: var(--muted); padding: 2px 4px; }
+  .legend p { max-width: none; }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+  .legend .sw.cmd { background: var(--accent); }
+  .legend .sw.ans { background: var(--dock); }
+  .legend .sw.wait { border: 1.5px solid var(--wait); }
+  .legend .sw.fault { background: var(--fault); }
+  .legend .sw.ghost { background: var(--accent-soft); border: 1px solid var(--accent); }
+  .legend .keys { font-family: var(--mono); font-size: 0.74rem; }
+  .inspector:not([hidden]) ~ .legend .hint { display: none; }
+
+  .transport {
+    position: sticky; bottom: 0; z-index: 10; display: grid; gap: 6px;
+    background: var(--paper); border-top: 1px solid var(--rule); margin-inline: -4px; padding: 8px 4px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  #lanes { display: block; width: 100%; height: 100px; cursor: grab; touch-action: pan-y; }
+  #lanes:active { cursor: grabbing; }
+  #overview { display: block; width: 100%; height: 44px; cursor: pointer; touch-action: none; }
+  .transport .controls { gap: 8px 12px; }
+  .transport .btn { padding: 6px 12px; font-size: 0.88rem; cursor: pointer; }
+  #play { min-width: 5.2em; border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  #time { font-size: 0.88rem; min-width: 12ch; }
+  .seg button { padding: 6px 9px; font-size: 0.78rem; }
+  .skip { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; color: var(--muted); cursor: pointer; }
+  .skip input { accent-color: var(--accent); }
+  #ff { font: 600 0.72rem var(--mono); color: var(--wait); border: 1px solid var(--wait); border-radius: 999px; padding: 1px 8px; }
+
+  /* The stage */
+  #stage svg text { pointer-events: none; }
+  svg .r-dock { fill: var(--dock-soft); stroke: var(--dock); stroke-width: 1.5; }
+  svg .r-name { font-weight: 600; font-size: 12.5px; }
+  svg .r-sub { font-size: 11px; fill: var(--muted); }
+  svg .r-tile-box { fill: var(--paper); stroke: var(--rule); stroke-width: 1.5; transition: stroke 80ms, fill 80ms; }
+  svg .r-tile.lit .r-tile-box { stroke: var(--dock); stroke-width: 2; }
+  svg .r-tile.bad .r-tile-box { fill: var(--fault-soft); stroke: var(--fault); }
+  svg .r-tile.chosen .r-tile-box { stroke: var(--accent); stroke-width: 2.5; }
+  svg .r-dial { fill: var(--panel); stroke: var(--rule); stroke-width: 1.5; pointer-events: none; }
+  svg .r-dial-tick { stroke: var(--muted); stroke-width: 1; pointer-events: none; }
+  svg .r-ghost { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 3 3; stroke-linecap: round; opacity: 0.55; pointer-events: none; }
+  svg .r-needle { stroke: var(--accent); stroke-width: 3.5; stroke-linecap: round; pointer-events: none; }
+  svg .r-tile.bad .r-needle { stroke: var(--fault); }
+  svg .r-hub { fill: var(--ink); pointer-events: none; }
+  svg .r-tile-name { font-weight: 600; font-size: 12px; }
+  svg .r-tile-val { font-size: 10.5px; fill: var(--muted); }
+  svg .r-tile.bad .r-tile-val { fill: var(--fault); }
+  svg .r-bar-bg { fill: var(--rule); pointer-events: none; }
+  svg .r-bar { fill: var(--dock); pointer-events: none; }
+  svg .r-tile.bad .r-bar { fill: var(--fault); }
+  svg .r-bus { stroke: var(--ink); stroke-width: 4; stroke-linecap: round; fill: none; opacity: 0.85; }
+  svg .r-hit { stroke: transparent; stroke-width: 18; fill: none; pointer-events: stroke; }
+  svg .r-node { fill: var(--paper); stroke: var(--rule); stroke-width: 1.5; transition: fill 80ms, stroke 80ms; }
+  svg .r-node.active { fill: var(--accent-soft); stroke: var(--accent); }
+  svg .r-node.chosen { stroke: var(--ink); stroke-width: 2.5; }
+  svg .r-edge { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  svg .r-edge.quiet { stroke-dasharray: 4 4; opacity: 0.7; }
+  svg .r-edge-t { font-size: 11px; fill: var(--muted); }
+  svg .r-head { fill: var(--muted); }
+  svg .r-live > * { cursor: pointer; }
+  svg .r-packet rect { stroke: var(--paper); stroke-width: 1; }
+  svg .r-packet.cmd rect { fill: var(--accent); }
+  svg .r-packet.ans rect { fill: var(--dock); }
+  svg .r-packet.chosen rect { stroke: var(--ink); stroke-width: 2; }
+  svg .r-packet text { font-size: 10px; font-weight: 600; fill: var(--paper); }
+  svg .r-queue { stroke: var(--wait); stroke-width: 1.5; }
+  svg .r-queue.cmd { fill: var(--accent-soft); }
+  svg .r-queue.ans { fill: var(--dock-soft); }
+  svg .r-msg rect { stroke: var(--accent); stroke-width: 1.5; }
+  svg .r-msg.state rect { fill: var(--paper); }
+  svg .r-msg.state text { fill: var(--accent); }
+  svg .r-msg.command rect { fill: var(--accent); }
+  svg .r-msg.command text { fill: var(--paper); }
+  svg .r-msg text { font-size: 11px; font-weight: 600; }
+  svg .r-msg.small circle { fill: var(--accent); stroke: var(--paper); stroke-width: 1.5; }
+  svg .r-pick { cursor: pointer; outline: none; }
+  svg .r-pick:focus-visible { stroke: var(--accent); stroke-width: 2.5; }
+
+  @media (max-width: 1100px) {
+    .play-grid { grid-template-columns: minmax(0, 1fr); }
+    .side { position: static; }
+    .inspector {
+      position: fixed; z-index: 20; left: 8px; right: 8px; bottom: calc(var(--transport-h, 0px) + 6px);
+      max-height: min(50vh, calc(100vh - var(--transport-h, 0px) - 80px)); box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.22);
+    }
+    .legend .hint { display: none; }
+  }
+  @media (max-width: 560px) {
+    .play { padding-top: 14px; gap: 12px; }
+    .stage-card { padding: 6px; }
+    .transport .controls { gap: 6px 8px; }
+    .transport .btn { padding: 6px 10px; }
+    #time { min-width: 0; font-size: 0.8rem; }
+    .seg button { padding: 5px 7px; font-size: 0.72rem; }
+    .legend .keys { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { animation: none; }
+    svg .r-tile-box, svg .r-node { transition: none; }
+  }
+</style>
+</head>
+<body data-run="openarm-dead" data-model="openarm">
+<div class="frame">
+  <header class="top">
+    <a class="wordmark" href="https://montmejat.github.io/keel/">keel</a>
+    <nav class="links" aria-label="Site">
+      <a href="./">Book</a>
+      <a href="run.html" aria-current="page">The run</a>
+      <a href="https://github.com/montmejat/keel">GitHub</a>
+      <a href="https://github.com/montmejat/drydock">drydock</a>
+      <button class="theme" type="button" data-theme-toggle><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 1.5 A6.5 6.5 0 0 1 8 14.5 Z"></path></svg><span class="theme-name">Auto</span></button>
+    </nav>
+  </header>
+
+  <main class="play">
+    <header class="play-head">
+      <div class="eyebrow"><span class="mag">A recorded run</span><span>openarm-dead</span></div>
+      <h1>A motor dies, played back</h1>
+      <p class="lede">OpenArm in drydock, run with <code>--break openarm_joint4:dead@6</code>, recorded by keel. Every frame on <code>vcan0</code>, every state and command keel published, every flag it raised, on one clock that starts at keel’s first state. Play, step, or tap anything to inspect it.</p>
+      <p class="note">From the book: <a href="./#cycle">One cycle, end to end</a> and <a href="./#dies">A motor dies, replayed</a>.</p>
+      <div class="jumps" id="jumps"><span class="note">Go to</span></div>
+    </header>
+
+    <div class="play-grid">
+      <div class="figure stage-card">
+        <div class="stage-wrap">
+          <div id="stage"></div>
+          <div id="stage-3d"><canvas id="arm3d" aria-label="OpenArm in 3D, each joint at the angle its motor reports, with a see-through ghost where it was told to be. Drag to turn it."></canvas></div>
+          <div id="stage-over"></div>
+        </div>
+        <p class="now" id="now"></p>
+      </div>
+      <div class="side">
+        <aside class="inspector" id="inspector" aria-label="Inspector" hidden>
+          <button class="insp-close" id="insp-close" type="button" aria-label="Close the inspector">×</button>
+          <div id="insp-body"></div>
+        </aside>
+        <div class="legend">
+          <p class="hint">Tap a motor, a frame, a message or a node to see what it holds.</p>
+          <p><span class="sw cmd"></span>keel’s side: commands, states, nodes at work</p>
+          <p><span class="sw ans"></span>drydock’s side: the motors’ answers</p>
+          <p><span class="sw wait"></span>a frame waiting for the bus</p>
+          <p><span class="sw fault"></span>a joint keel flags</p>
+          <p><span class="sw ghost"></span>the see-through arm: where it was told to be</p>
+          <p class="keys">space play · ← → step · 1–5 speed · esc close</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="transport" role="group" aria-label="Playback">
+      <canvas id="lanes" aria-label="keel-can, the controller and the bus around the moment shown. Drag to move through time; tap a frame or a cycle to inspect it."></canvas>
+      <canvas id="overview" aria-label="The whole run: flags in red, log lines as marks. Tap or drag to go anywhere."></canvas>
+      <div class="controls">
+        <button class="btn" id="back" type="button" aria-label="Step back">←</button>
+        <button class="btn" id="play" type="button" aria-pressed="false">Play</button>
+        <button class="btn" id="fwd" type="button" aria-label="Step forward">→</button>
+        <span class="mono" id="time"></span>
+        <div class="seg" id="speed" role="group" aria-label="Speed: run time per second">
+          <button type="button" data-us="100">0.1 ms/s</button>
+          <button type="button" data-us="1000">1 ms/s</button>
+          <button type="button" data-us="10000">10 ms/s</button>
+          <button type="button" data-us="100000">0.1 s/s</button>
+          <button type="button" data-us="1000000">real time</button>
+        </div>
+        <label class="skip"><input type="checkbox" id="skip" checked> skip quiet time</label>
+        <span id="ff" hidden>×12</span>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="runs/openarm-dead.js"></script>
+<script src="runs/openarm-dead-wire.js"></script>
+<script src="models/openarm.js"></script>
+<script src="damiao.js"></script>
+<script src="arm3d.js"></script>
+<script src="run.js"></script>
+</body>
+</html>

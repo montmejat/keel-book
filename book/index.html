@@ -1,0 +1,1336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The keel book</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="keel, a robotics middleware in Rust, and drydock, the robot's motors simulated behind a CAN bus: how each works, how they fit together, and how to work with them.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23151515'/%3E%3Cpolyline points='4,20 12,20 14,9 18,25 20,20 28,20' fill='none' stroke='%237cc0ea' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script src="theme.js"></script>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="viz.css">
+<style>
+  /* The book: the site's datasheet, with a table of contents down the side.
+     Cobalt is keel's side of the wire, copper drydock's. */
+
+  body { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .book { display: grid; grid-template-columns: clamp(190px, 24vw, 260px) minmax(0, 1fr); gap: clamp(20px, 3vw, 40px); align-items: start; padding-top: 28px; }
+  .toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); max-height: calc(100vh - 32px); overflow-y: auto; padding-bottom: 24px; }
+  .toc-body { display: grid; gap: 14px; }
+  .toc summary { display: none; }
+  .toc .search { width: 100%; font: 400 0.92rem var(--body); color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; }
+  .toc .search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .toc .part { display: grid; gap: 2px; }
+  .toc .part > span { font: 500 0.72rem/1.4 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 6px 0 4px; }
+  .toc a.ch { display: block; padding: 4px 8px 4px 10px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 0.93rem; line-height: 1.35; }
+  .toc a.ch:hover { color: var(--ink); }
+  .toc a.ch.play { color: var(--accent); }
+  .toc a.ch.play::before { content: "▶"; font-size: 0.7em; margin-right: 6px; vertical-align: 1px; }
+  .toc a.ch[aria-current="page"] { color: var(--ink); border-left-color: var(--accent); font-weight: 500; }
+  .toc .mode { justify-self: start; }
+  .results { display: grid; gap: 8px; }
+  .results a { display: grid; gap: 2px; text-decoration: none; color: var(--ink); padding: 6px 8px; border-radius: 8px; background: var(--panel); font-size: 0.9rem; }
+  .results a small { color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
+  .results p { font-size: 0.85rem; color: var(--muted); }
+
+  main.chapters { min-width: 0; display: grid; gap: 0; }
+  article.chapter { display: grid; gap: 18px; padding-bottom: 40px; min-width: 0; }
+  body.one-page article.chapter + article.chapter { border-top: 1px solid var(--rule); padding-top: 40px; }
+  article.chapter > header { display: grid; gap: 10px; }
+  article.chapter h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); max-width: 22ch; }
+  article.chapter h2 { font-size: clamp(1.5rem, 3vw, 2rem); margin-top: 18px; max-width: 30ch; }
+  article.chapter h3 { margin-top: 6px; }
+  article.chapter p, article.chapter li { max-width: 70ch; }
+  article.chapter ul, article.chapter ol { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+  .side { color: var(--dock); }
+  .keelc { color: var(--accent); }
+  .callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 14px; border-radius: 0 8px 8px 0; display: grid; gap: 6px; max-width: 74ch; }
+  .callout.dock { border-color: var(--dock); background: var(--dock-soft); }
+  .callout.wait { border-color: var(--wait); background: var(--wait-soft); }
+  .callout strong { font-weight: 600; }
+  .scroll.tbl table.data { min-width: 560px; }
+  table.data td code { white-space: nowrap; }
+  pre.code { white-space: pre; }
+  .pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--rule); padding-top: 16px; margin-top: 8px; }
+  .pager a { display: grid; gap: 2px; text-decoration: none; padding: 10px 14px; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); min-width: 0; max-width: 48%; }
+  .pager a:hover { border-color: var(--accent); }
+  .pager a small { font: 500 0.72rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .pager a span { color: var(--ink); font-weight: 500; }
+  .pager a.next { margin-left: auto; text-align: right; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; max-width: 74ch; }
+  .kv dt { font-family: var(--mono); font-size: 0.88rem; }
+  .kv dd { margin: 0; color: var(--ink); }
+  svg .box-dock { fill: var(--dock-soft); stroke: var(--dock); stroke-width: 1.5; }
+  svg .fill-accent { fill: var(--accent); }
+  svg .fill-dock { fill: var(--dock); }
+  svg .dock { fill: var(--dock); }
+  svg .accent { fill: var(--accent); }
+  svg .lane { fill: var(--paper); stroke: var(--rule); stroke-width: 1; }
+  svg .tick { stroke: var(--ink); stroke-width: 1.4; }
+  svg .tick-dash { stroke: var(--ink); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  svg .group { fill: none; stroke: var(--rule); stroke-width: 1.2; stroke-dasharray: 5 4; }
+  svg text.t { font-family: var(--body); font-size: 12px; }
+  svg text.big { font-family: var(--display); font-weight: 700; font-size: 18px; letter-spacing: 0.02em; }
+
+  @media (max-width: 720px) {
+    .book { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 16px; }
+    .toc { position: static; max-height: none; overflow: visible; border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); padding: 10px 12px; }
+    .toc-body { padding-top: 10px; }
+    .toc summary { display: list-item; cursor: pointer; font: 500 0.8rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .pager a { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+  <header class="top">
+    <a class="wordmark" href="https://montmejat.github.io/keel/">keel</a>
+    <nav class="links" aria-label="Site">
+      <a href="./" aria-current="page">Book</a>
+      <a href="run.html">The run</a>
+      <a href="https://github.com/montmejat/keel">GitHub</a>
+      <a href="https://github.com/montmejat/drydock">drydock</a>
+      <button class="theme" type="button" data-theme-toggle><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 1.5 A6.5 6.5 0 0 1 8 14.5 Z"></path></svg><span class="theme-name">Auto</span></button>
+    </nav>
+  </header>
+
+  <div class="book">
+    <details class="toc" id="toc" open>
+      <summary>Contents</summary>
+      <div class="toc-body">
+      <input class="search" id="search" type="search" placeholder="Search the book" aria-label="Search the book" autocomplete="off">
+      <div class="results" id="results" hidden></div>
+      <nav id="chapters-nav" aria-label="Chapters">
+        <div class="part"><span>Start here</span>
+          <a class="ch" href="#welcome">Welcome</a>
+          <a class="ch" href="#quickstart">OpenArm in ten minutes</a>
+          <a class="ch" href="#map">The map</a>
+        </div>
+        <div class="part"><span>keel</span>
+          <a class="ch" href="#dataflows">Dataflows and nodes</a>
+          <a class="ch" href="#looking">Running and looking</a>
+          <a class="ch" href="#control">The control layer</a>
+          <a class="ch" href="#drivers">Joints and drivers</a>
+          <a class="ch" href="#controllers">Writing a controller</a>
+          <a class="ch" href="#beyond">Machines, deployment, agents</a>
+        </div>
+        <div class="part"><span>drydock</span>
+          <a class="ch" href="#drydock">What drydock is</a>
+          <a class="ch" href="#robot-files">Robot files</a>
+          <a class="ch" href="#damiao">Damiao's motors</a>
+          <a class="ch" href="#time">Time and the bus</a>
+          <a class="ch" href="#faults">Encoders and faults</a>
+          <a class="ch" href="#inside">Inside drydock</a>
+        </div>
+        <div class="part"><span>Together</span>
+          <a class="ch" href="#wire">The wire between them</a>
+          <a class="ch" href="#cycle">One cycle, end to end</a>
+          <a class="ch" href="#dies">A motor dies, replayed</a>
+          <a class="ch play" href="run.html">The run, played back</a>
+          <a class="ch" href="#bandwidth">CAN, CAN FD and bandwidth</a>
+          <a class="ch" href="#recipes">Recipes</a>
+          <a class="ch" href="#troubleshooting">Troubleshooting</a>
+        </div>
+        <div class="part"><span>Reference</span>
+          <a class="ch" href="#flags">Commands and flags</a>
+          <a class="ch" href="#layouts">Messages and frames</a>
+          <a class="ch" href="#measured">Measured</a>
+          <a class="ch" href="#glossary">Glossary</a>
+          <a class="ch" href="#agents">For agents</a>
+        </div>
+      </nav>
+      <button class="btn mode" id="mode" type="button" aria-pressed="false">Show as one page</button>
+      </div>
+    </details>
+
+    <main class="chapters" id="main">
+
+<!-- ═══════════════════════════════ START HERE ═══════════════════════════════ -->
+
+<article class="chapter" id="welcome" data-part="Start here">
+  <header>
+    <div class="eyebrow"><span class="mag">Start here</span><span>keel · drydock</span></div>
+    <h1>Welcome</h1>
+    <p class="lede">Two projects that meet on a CAN bus. <span class="keelc">keel</span> is a robot's software. <span class="side">drydock</span> is the robot's motors, simulated, behind the same bus the real ones would be on.</p>
+  </header>
+  <p><strong>keel</strong> is a robotics middleware in about 10,000 lines of Rust: processes exchanging messages through shared memory, a daemon per machine, real-time loops, tracing, recording, deployment, and a control layer that drives motors. <strong>drydock</strong> plays a robot's motors on a virtual CAN interface (<code>vcan0</code>), answering frame for frame and as fast as a real bus carries frames, while MuJoCo moves the robot's body behind them.</p>
+  <p>The software that drives drydock is the software that drives the robot. Swap <code>vcan0</code> for <code>can0</code> and keel is talking to real motors; nothing else changes. That's the point of drawing the line at the bus: the driver, its timing and its handling of every answer run for real, and only the hardware is simulated.</p>
+  <div class="callout">
+    <p><strong>The one-paragraph model.</strong> A keel <em>dataflow</em> is a set of processes (<em>nodes</em>) wired by name. A controller node gets the joints' <code>state</code> and answers with a <code>command</code> for each. A bus-master node, <code>keel-can</code>, turns commands into CAN frames and the motors' answers into the next state. drydock sits at the other end of the bus: it decodes the frames, runs each motor's firmware, pushes on the joints of a MuJoCo model, and answers.</p>
+  </div>
+  <h2>How to read this book</h2>
+  <ul>
+    <li><strong>New here:</strong> <a href="#quickstart">OpenArm in ten minutes</a> runs the whole thing, then <a href="#map">The map</a> says what you just ran.</li>
+    <li><strong>To watch it run:</strong> <a href="run.html">the run, played back</a>. One recorded OpenArm run, every frame on the bus and every message in keel, from 0.1 ms a second to real time, with the elbow's motor dying halfway.</li>
+    <li><strong>Working on keel:</strong> the keel part, from <a href="#dataflows">dataflows</a> to <a href="#drivers">drivers</a>.</li>
+    <li><strong>Working on drydock:</strong> the drydock part, from <a href="#robot-files">robot files</a> to <a href="#inside">its insides</a>.</li>
+    <li><strong>Making them work together, or on a real robot:</strong> the Together part, then <a href="#recipes">Recipes</a>.</li>
+    <li><strong>An agent:</strong> start with <a href="#agents">For agents</a>; every chapter is in this one HTML file, readable without its script.</li>
+  </ul>
+  <p>Each chapter goes into one topic and links to where it's kept in full: keel's <code>docs/</code> and decision records, drydock's <code>README.md</code> and <code>docs/architecture.md</code>. When this book and those disagree, they win: they're next to the code.</p>
+  <h2>The two projects</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th></th><th>keel</th><th>drydock</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Is</td><td>a robot's software stack</td><td>a robot's motors and body, simulated</td></tr>
+        <tr><td class="name">Repository</td><td><a href="https://github.com/montmejat/keel">montmejat/keel</a>, branch <code>main</code></td><td><a href="https://github.com/montmejat/drydock">montmejat/drydock</a>, branch <code>master</code></td></tr>
+        <tr><td class="name">Language</td><td>Rust only, static binaries, 6 direct dependencies</td><td>Rust, and MuJoCo's C library through a 90-line C shim</td></tr>
+        <tr><td class="name">Runs on</td><td>the robot's computers</td><td>a development machine, in place of the robot</td></tr>
+        <tr><td class="name">Speaks</td><td>shared memory between nodes; CAN to motors</td><td>CAN to the bus master; MuJoCo to the body</td></tr>
+        <tr><td class="name">Knows the other</td><td>no</td><td>no</td></tr>
+      </tbody>
+    </table>
+  </div>
+</article>
+
+<article class="chapter" id="quickstart" data-part="Start here">
+  <header>
+    <div class="eyebrow"><span class="mag">Start here</span><span>tutorial</span></div>
+    <h1>OpenArm in ten minutes</h1>
+    <p class="lede">From two clones to keel driving a simulated OpenArm over CAN FD, its first joint swinging and its gripper opening and closing.</p>
+  </header>
+  <p><a href="https://github.com/enactic/openarm">OpenArm</a> is an open-source arm on Damiao motors: seven joints and a gripper, eight motors on one CAN bus. drydock loads Enactic's own MuJoCo model of it; keel drives it as it would the real one.</p>
+  <h2>What you need</h2>
+  <ul>
+    <li>Linux (x86-64), Rust (stable), a C compiler, <code>git</code>, <code>curl</code> (on Debian or Ubuntu: <code>sudo apt install build-essential git curl</code>).</li>
+    <li><code>sudo</code>, once per boot, to make the virtual CAN interface. Everything else runs as you.</li>
+    <li>Both repositories side by side:</li>
+  </ul>
+<pre class="code">git clone https://github.com/montmejat/keel
+git clone https://github.com/montmejat/drydock</pre>
+  <h2>1. drydock, once</h2>
+<p>MuJoCo, once, checksum-verified. drydock's build says the same command if it's missing:</p>
+<pre class="code">mkdir -p ~/.cache/drydock &amp;&amp; cd ~/.cache/drydock &amp;&amp; \
+  curl -fLO https://github.com/google-deepmind/mujoco/releases/download/3.16.0/mujoco-3.16.0-linux-x86_64.tar.gz &amp;&amp; \
+  echo "139577c541d43716a63992ab698cbc7b09788b1d547fb82b682d59b40ef49b9d  mujoco-3.16.0-linux-x86_64.tar.gz" | sha256sum -c &amp;&amp; \
+  tar xzf mujoco-3.16.0-linux-x86_64.tar.gz &amp;&amp; rm mujoco-3.16.0-linux-x86_64.tar.gz</pre>
+<pre class="code"><span class="c"># in drydock/</span>
+cargo install --path .
+<span class="c"># a virtual CAN interface carrying CAN FD, once per boot (drydock and keel say so when it's missing)</span>
+sudo ip link add dev vcan0 type vcan &amp;&amp; sudo ip link set vcan0 mtu 72 up</pre>
+  <h2>2. The arm</h2>
+<pre class="code"><span class="c"># in drydock/, a terminal of its own</span>
+drydock examples/openarm/robot.yml</pre>
+  <p>The first time, it fetches OpenArm's model (Enactic's repository, at a pinned commit, only the folder it needs). It lists the bus and its eight motors, then waits. The arm hangs limp: its motors are disabled until a bus master enables them.</p>
+<pre class="code">drydock: openarm_mujoco at a3c8a57: v1/openarm.xml, in real time, 1 ms steps
+  vcan0 (CAN FD, 1 / 5 Mbit/s)
+    openarm_joint1         0x001 -> 0x011  peak 54 N m
+    …
+    openarm_finger_joint1  0x008 -> 0x018  peak 10 N m</pre>
+  <h2>3. keel, driving it</h2>
+<pre class="code"><span class="c"># in keel/</span>
+cargo build
+./target/debug/keel doctor examples/openarm.yml   <span class="c"># what's missing, with the command to fix it</span>
+./target/debug/keel run examples/openarm.yml</pre>
+  <p>Start the two in either order: <code>keel-can</code> waits for the motors to answer, saying so in <code>keel logs arm</code>.</p>
+  <p>In another terminal, look:</p>
+<pre class="code">./target/debug/keel logs arm          <span class="c"># each motor: MIT mode, its ranges, read from its registers</span>
+./target/debug/keel logs controller   <span class="c"># "3.0s joints at -0.40 -0.00 -0.00 +1.64 -0.00 -0.00 +0.06 -1.03 rad"</span>
+./target/debug/keel trace             <span class="c"># state → command: ~15–40 µs end to end</span>
+./target/debug/keel top               <span class="c"># live: nodes, links, latencies, logs</span>
+./target/debug/keel stop              <span class="c"># or Ctrl-C in the first terminal: the motors are disabled</span></pre>
+  <p>Joint 1 swings ±0.4 rad every four seconds, joint 4 holds its bend at 1.64 rad (against gravity, with OpenArm's own gains), and the gripper motor goes between 0 and −1.03 rad every two seconds.</p>
+  <div class="callout dock">
+    <p><strong>Try breaking it.</strong> Stop drydock and start it again with <code>--break openarm_joint4:dead@5</code>: five seconds in, the elbow's motor gives no torque. In <code>keel logs controller</code>, joint 4 drops to its stop at 2.44 rad. Nothing else reports it; see <a href="#faults">Encoders and faults</a>.</p>
+  </div>
+  <h2>Next</h2>
+  <p><a href="#map">The map</a> names what just ran. <a href="#cycle">One cycle, end to end</a> follows a single state and command through both projects.</p>
+</article>
+
+<article class="chapter" id="map" data-part="Start here">
+  <header>
+    <div class="eyebrow"><span class="mag">Start here</span><span>overview</span></div>
+    <h1>The map</h1>
+    <p class="lede">What ran in the quick start, which project each part belongs to, and the one place they touch.</p>
+  </header>
+  <div class="figure">
+    <div class="scroll">
+      <svg viewBox="0 0 900 340" role="img" aria-label="keel's controller and bus master on one side; the same Damiao frames go either over can0 to the real OpenArm or over vcan0 to drydock, which runs the motors' firmware and MuJoCo.">
+        <defs><marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head-accent"></path></marker>
+        <marker id="m1m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head-muted"></path></marker></defs>
+        <rect class="group" x="10" y="12" width="240" height="316" rx="8"></rect>
+        <text class="big accent" x="26" y="40">keel</text>
+        <text class="t muted" x="26" y="58">on the robot's computer</text>
+        <rect class="box-accent" x="30" y="76" width="200" height="56" rx="5"></rect>
+        <text x="130" y="100" text-anchor="middle">openarm-wave</text>
+        <text class="t muted" x="130" y="119" text-anchor="middle">controller</text>
+        <rect class="box-accent" x="30" y="246" width="200" height="56" rx="5"></rect>
+        <text x="130" y="270" text-anchor="middle">keel-can</text>
+        <text class="t muted" x="130" y="289" text-anchor="middle">bus master</text>
+        <line class="wire" x1="90" y1="136" x2="90" y2="240" marker-end="url(#m1)"></line>
+        <text class="t" x="82" y="182" text-anchor="end">command</text>
+        <line class="wire" x1="170" y1="242" x2="170" y2="138" marker-end="url(#m1)"></line>
+        <text class="t" x="178" y="182">state</text>
+        <text class="t muted" x="130" y="226" text-anchor="middle">shared memory</text>
+        <path class="wire-muted" d="M230 274 H330 V86 H500" marker-end="url(#m1m)"></path>
+        <path class="wire" d="M330 274 V256 H500" marker-end="url(#m1)"></path>
+        <text class="t muted" x="340" y="76">can0: the real arm</text>
+        <text class="t" x="340" y="246">vcan0: drydock</text>
+        <text class="t muted" x="258" y="300">Damiao MIT frames</text>
+        <text class="t muted" x="258" y="316">CAN FD, 1 / 5 Mbit/s</text>
+        <rect class="box" x="504" y="34" width="380" height="96" rx="6"></rect>
+        <text class="big" x="522" y="62">OpenArm</text>
+        <text class="t" x="522" y="84">8 Damiao motors on can0</text>
+        <text class="t muted" x="522" y="104">DM8009 ×2 · DM4340 ×2 · DM4310 ×4</text>
+        <rect class="box-dock" x="504" y="160" width="380" height="168" rx="6"></rect>
+        <text class="big dock" x="522" y="188">drydock</text>
+        <rect class="box" x="522" y="202" width="344" height="32" rx="4"></rect>
+        <text class="t" x="536" y="223">the bus: each frame's bits, lowest id first</text>
+        <rect class="box" x="522" y="240" width="344" height="32" rx="4"></rect>
+        <text class="t" x="536" y="261">8 motors' firmware: answers, registers, MIT law</text>
+        <rect class="box" x="522" y="278" width="344" height="32" rx="4"></rect>
+        <text class="t" x="536" y="299">drivetrains → MuJoCo, OpenArm's own model</text>
+      </svg>
+    </div>
+    <p class="note">keel's side is the same on the robot and in simulation. Only <code>--interface</code> changes.</p>
+  </div>
+  <h2>Where things are</h2>
+<pre class="code">keel/
+  crates/keel          the node API: shared memory, channels, tracing, stamps, periodic loops
+  crates/keel-daemon   runs dataflows: sessions, coordinator, daemon, control API
+  crates/keel-cli      the `keel` command, and `keel top`
+  crates/keel-control  joints and controllers: messages, cycles, drivers (CAN, Damiao, pendulums)
+  crates/keel-record   recordings      crates/keel-web  `keel web`     crates/keel-mcp  tools for an agent
+  crates/keel-micro    a node on a microcontroller, and keel-serial its stand-in
+  examples/            dataflows (openarm.yml, control-*.yml, …) and their nodes
+  docs/                one page per layer, docs/decisions/: one record per decision, and index.html: the website
+
+drydock/
+  src/can/             frames, SocketCAN, and timing.rs: how long frames take, which goes first
+  src/damiao/          protocol.rs (the frames), motor.rs (one motor's firmware), bus.rs (motors on a bus)
+  src/drivetrain.rs    peak torque, transmission, what a motor senses
+  src/effects.rs       imperfect encoders, faults
+  src/world.rs         MuJoCo, through shim/world.c
+  src/dock.rs          the robot: buses of motors on the world's joints
+  src/run.rs           the clock: real time or lockstep
+  src/robot.rs         the robot file
+  examples/arm         a two-joint arm, and wave.rs, a bus master for it
+  examples/openarm     OpenArm v1, and hold.cpp, a bus master on OpenArm's own library
+  docs/architecture.md the design
+
+keel-book/
+  book/                this book, the run played back (run.html), and runs/ and models/: what they draw
+  src/                 keel-book: a recorded run, or a robot's body, into book/</pre>
+  <h2>The one place they touch</h2>
+  <p>The CAN bus, and the frame format of Damiao's motors on it. keel has its own copy of that format (<code>keel_control::damiao</code>); drydock has its own (<code>damiao::protocol</code>). Neither depends on the other: keel must stay free of a simulator and of C libraries, and drydock answers any bus master, not only keel (OpenArm's own C++ library drives it just as well). <a href="#wire">The wire between them</a> draws the contract.</p>
+</article>
+
+<!-- ═══════════════════════════════ KEEL ═══════════════════════════════ -->
+
+<article class="chapter" id="dataflows" data-part="keel">
+  <header>
+    <div class="eyebrow"><span class="mag">keel</span><span>runtime</span></div>
+    <h1>Dataflows and nodes</h1>
+    <p class="lede">A dataflow is a YAML file of processes wired by name. keel starts them, moves their messages through shared memory, and stops them in order.</p>
+  </header>
+  <h2>Processes and planes</h2>
+  <div class="figure">
+    <div class="scroll">
+      <svg viewBox="0 0 900 250" role="img" aria-label="keel run is the coordinator; a daemon per machine spawns its nodes; nodes exchange messages through shared memory on a machine and through their daemons across machines; tools talk to the control plane only.">
+        <defs><marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head-accent"></path></marker>
+        <marker id="m2m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head-muted"></path></marker></defs>
+        <rect class="box" x="330" y="14" width="240" height="44" rx="5"></rect>
+        <text x="450" y="41" text-anchor="middle">keel run · the coordinator</text>
+        <rect class="box" x="640" y="14" width="240" height="44" rx="5"></rect>
+        <text x="760" y="41" text-anchor="middle">keel top · trace · logs · web</text>
+        <line class="wire-muted" x1="636" y1="36" x2="576" y2="36" marker-end="url(#m2m)"></line>
+        <path class="wire-muted" d="M390 62 V96 H210 V118" marker-end="url(#m2m)"></path>
+        <path class="wire-muted" d="M510 62 V96 H690 V118" marker-end="url(#m2m)"></path>
+        <text class="t muted" x="450" y="90" text-anchor="middle">control plane: JSON lines</text>
+        <rect class="box-accent" x="100" y="122" width="220" height="44" rx="5"></rect>
+        <text x="210" y="149" text-anchor="middle">daemon "robot"</text>
+        <rect class="box-accent" x="580" y="122" width="220" height="44" rx="5"></rect>
+        <text x="690" y="149" text-anchor="middle">daemon "base"</text>
+        <line class="wire" x1="324" y1="144" x2="574" y2="144" marker-end="url(#m2)"></line>
+        <text class="t" x="450" y="136" text-anchor="middle">data across machines: TCP</text>
+        <rect class="box" x="40" y="196" width="130" height="40" rx="5"></rect><text x="105" y="221" text-anchor="middle">keel-can</text>
+        <rect class="box" x="250" y="196" width="130" height="40" rx="5"></rect><text x="315" y="221" text-anchor="middle">controller</text>
+        <line class="wire" x1="174" y1="216" x2="244" y2="216" marker-end="url(#m2)"></line>
+        <line class="wire-muted" x1="105" y1="170" x2="105" y2="192"></line><line class="wire-muted" x1="315" y1="170" x2="315" y2="192"></line>
+        <text class="t muted" x="210" y="190" text-anchor="middle">shared memory</text>
+        <rect class="box" x="625" y="196" width="130" height="40" rx="5"></rect><text x="690" y="221" text-anchor="middle">recorder</text>
+        <line class="wire-muted" x1="690" y1="170" x2="690" y2="192"></line>
+      </svg>
+    </div>
+    <p class="note">On one machine, <code>keel run</code> is the coordinator and the only daemon, in one process. The daemon spawns nodes but stays off the data path: descriptors go node to node through rings in <code>/dev/shm</code>, woken by futexes.</p>
+  </div>
+  <p>Two planes, kept apart on purpose. The <strong>data plane</strong> moves messages, and must be fast: about 5.6 µs for a round trip between two nodes, 5 million messages a second, whatever the payload's size, since only a descriptor moves. The <strong>control plane</strong> starts, stops and reports; every tool (<code>keel top</code>, <code>keel web</code>, an agent's MCP server) is a client of it, and never touches a payload.</p>
+  <h2>A dataflow file</h2>
+<pre class="code">nodes:
+  - id: arm
+    path: ../target/debug/keel-can          <span class="c"># or `build: &lt;binary&gt;`: keel builds and ships it</span>
+    args: ["--interface", "vcan0", "--protocol", "damiao", "--fd", "true", "--hz", "500",
+           "--motors", "0x01:0x11,0x02:0x12,…"]
+    restart: on-failure
+    inputs:
+      command: { source: controller/command, keep: latest }
+
+  - id: controller
+    path: ../target/debug/openarm-wave
+    rt: { priority: 80, cpus: [3] }         <span class="c"># SCHED_FIFO 80, pinned: needs an rtprio limit</span>
+    inputs:
+      state: { source: arm/state, keep: latest }   <span class="c"># &lt;input&gt;: &lt;node&gt;/&lt;output&gt;</span></pre>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Field</th><th>Means</th></tr></thead>
+      <tbody>
+        <tr><td><code>inputs</code></td><td><code>name: node/output</code>, or with <code>keep</code>: <code>all</code> (every message, the sender waits for a slow receiver) or <code>latest</code> (only the newest, the sender never waits: controllers, recorders, viewers)</td></tr>
+        <tr><td><code>rt</code></td><td>SCHED_FIFO priority and CPUs; any <code>rt:</code> also locks memory and sets a 1 ns timer slack</td></tr>
+        <tr><td><code>phase_us</code></td><td>where in their period the node's periodic loops tick</td></tr>
+        <tr><td><code>restart</code>, <code>watchdog_ms</code></td><td><code>never</code>, <code>on-failure</code>, <code>always</code>; kill a node that stops taking or sending</td></tr>
+        <tr><td><code>machines</code>, <code>machine</code></td><td>a dataflow across machines: a daemon address per name, a name per node</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>A node</h2>
+<pre class="code">use keel::{Event, Node};
+
+fn main() -> std::io::Result&lt;()&gt; {
+    let mut node = Node::from_env()?;              <span class="c">// the daemon told it who it is</span>
+    while let Event::Input { id, data } = node.next_event()? {
+        <span class="c">// `data` is the payload, in shared memory; `data.stamp_ns()` the moment it describes</span>
+        node.send_output("out", &amp;data)?;
+    }
+    Ok(())                                         <span class="c">// Event::Stop: upstream is done</span>
+}</pre>
+  <p>Payloads are raw bytes to keel; layouts belong to the crates above it (<code>keel-control</code> gives joints' states and commands one). The daemon starts nodes only once all have registered, stops them from the sources down, and sends SIGTERM, then SIGKILL, to those that don't listen.</p>
+  <p class="note">In full: <a href="https://github.com/montmejat/keel/blob/main/docs/dataflow.md">docs/dataflow.md</a>, <a href="https://github.com/montmejat/keel/blob/main/docs/architecture.md">docs/architecture.md</a>.</p>
+</article>
+
+<article class="chapter" id="looking" data-part="keel">
+  <header>
+    <div class="eyebrow"><span class="mag">keel</span><span>observability</span></div>
+    <h1>Running and looking</h1>
+    <p class="lede">Every message is traced, every node's output is captured, and a dataflow can be recorded and replayed. The tools all read the same control API.</p>
+  </header>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Command</th><th>Does</th></tr></thead>
+      <tbody>
+        <tr><td><code>keel run &lt;file&gt;</code></td><td>runs a dataflow in the foreground; Ctrl-C stops it in order</td></tr>
+        <tr><td><code>keel ps</code> · <code>keel stop</code></td><td>running dataflows; a graceful stop</td></tr>
+        <tr><td><code>keel logs [-f] [node]</code></td><td>what nodes printed, with time since start: <code>+3.011s controller …</code></td></tr>
+        <tr><td><code>keel top</code></td><td>live: nodes, links, latencies, logs, traces (<code>↑↓</code>, <code>f</code> filter, <code>g</code> graph, <code>s</code> stop, <code>q</code> quit)</td></tr>
+        <tr><td><code>keel trace [--export t.json]</code></td><td>per input, latency and processing time as percentiles; then the latest traces, hop by hop. The export opens in ui.perfetto.dev</td></tr>
+        <tr><td><code>keel web</code></td><td>the graph, rates, logs and an agent's pending requests, in a browser</td></tr>
+        <tr><td><code>keel events</code></td><td>status, new log lines and latency as JSON lines: for scripts</td></tr>
+        <tr><td><code>keel restart &lt;node&gt;</code></td><td>kills a node for its restart policy to bring back</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>Reading <code>keel trace</code></h2>
+<pre class="code">INPUT              FROM                 MSGS    LAT p50    p99    PROC p50    p99
+arm/command        controller/command   3001     6.9µs  21.5µs     1.7µs   6.9µs
+controller/state   arm/state            3001     8.7µs   155µs     9.7µs  38.9µs
+
+arm/state #3389: 23.5µs end to end
+  → controller/state  8.1µs  then processing 9.4µs
+    controller/command #3389
+      → arm/command  6.2µs  then processing 3.0µs</pre>
+  <p><strong>Latency</strong> is from a message's publishing to its being taken; <strong>processing</strong>, from taken to released. A trace follows one message through everything it caused, across machines too: here a state, the command it caused, and the command reaching the bus master, 23.5 µs in all.</p>
+  <h2>Stamps, recordings and replays</h2>
+  <p>Every message carries a <strong>stamp</strong>: the moment of the world it describes, not when it was sent. A joints' state is stamped with when the joints were read; a command inherits its state's stamp. Controllers take their time from stamps, never from the clock, which is what lets one run unchanged against a robot, a simulation in lockstep, or a replay at twice the speed.</p>
+<pre class="code">keel run examples/pipeline-recorded.yml                 <span class="c"># a recorder node writes its inputs</span>
+keel replay &lt;file&gt; examples/pipeline.yml --speed 2      <span class="c"># sources replaced by the recording</span>
+keel export &lt;file&gt; dataset/ --channel brightness         <span class="c"># files and an index.csv</span></pre>
+  <p>A recorder with <code>--last 2.5</code> is a flight recorder: it keeps the last seconds in memory, and the daemon saves them when a node fails, as a recording that replays the failure.</p>
+  <p class="note">In full: <a href="https://github.com/montmejat/keel/blob/main/docs/observability.md">docs/observability.md</a> and <a href="https://github.com/montmejat/keel/blob/main/docs/web.md">docs/web.md</a>.</p>
+</article>
+
+<article class="chapter" id="control" data-part="keel">
+  <header>
+    <div class="eyebrow"><span class="mag">keel</span><span>keel-control</span></div>
+    <h1>The control layer</h1>
+    <p class="lede">Joints and controllers as ordinary nodes. Hardware is whatever publishes <code>state</code> and takes <code>command</code>; the dataflow file is the hardware interface.</p>
+  </header>
+  <p><code>keel-control</code> is a crate above the node API, built with only what any keel user gets. It gives two payloads a layout, one entry per joint, back to back, little-endian:</p>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Message</th><th>Per joint</th><th>Bytes</th></tr></thead>
+      <tbody>
+        <tr><td class="name">State</td><td>position (rad), velocity (rad/s), effort (N m: the torque the drive gives), <code>f64</code>; its status: flags (drive error, disabled, underpowered, behind, frozen) and the drive's own code, <code>u32</code></td><td class="num">32</td></tr>
+        <tr><td class="name">Command</td><td>position (rad), velocity (rad/s), kp (N m/rad), kd (N m s/rad), effort (N m), <code>f64</code></td><td class="num">40</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>A command is an MIT command</h2>
+  <p>A command asks for the torque <code>kp (position − θ) + kd (velocity − θ̇) + effort</code>, where θ and θ̇ are the joint's as it is: a virtual spring and damper toward a target, plus a feed-forward torque. It's the command format of quasi-direct-drive motors, called MIT mode after MIT's Mini Cheetah. One format covers every kind of control: a plain torque (<code>kp = kd = 0</code>, <code>Command::effort(τ)</code>), stiff position control (high <code>kp</code>), compliance (low <code>kp</code>), model-based control (a target plus gravity compensation in <code>effort</code>).</p>
+  <p>Whoever drives the joint closes that loop, and the controller doesn't know who: a Damiao motor in its firmware, tens of thousands of times a second; <code>keel-sim</code> every simulation step; <code>keel-can</code> once a cycle, for drives that only take a torque. (<a href="https://github.com/montmejat/keel/blob/main/docs/decisions/0031-mit-commands-and-damiao.md">Decision 0031</a>.)</p>
+  <h2>A cycle</h2>
+  <p>A bus master or simulation ticks once a period: it publishes the state, waits up to a deadline for the command that answers it, and acts on it in the same cycle.</p>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th><code>--cycle</code></th><th>The command acts</th><th>For</th></tr></thead>
+      <tbody>
+        <tr><td><code>same</code> (default)</td><td>as soon as it comes, if before <code>--deadline-us</code> (300 µs); else at the next tick, the previous one meanwhile</td><td>controllers that answer fast: ~20 µs from state to command at 1 kHz</td></tr>
+        <tr><td><code>next</code></td><td>at the next tick: a constant one-period delay</td><td>controllers that can't answer within the deadline</td></tr>
+        <tr><td><code>lockstep</code></td><td>when it comes; no clock, no deadline</td><td>simulations only: as fast as the controller goes</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The answer is recognised by its trace: a controller that sends while holding the state names the state as its parent. Late commands are counted, and logged once a second: <code>3 of 500 commands missed the 300µs deadline</code>.</p>
+  <h2>Time</h2>
+  <ul>
+    <li><strong>Stamps</strong>: a controller's <code>dt</code> is the gap between two states' stamps.</li>
+    <li><strong>Phases</strong>: periodic loops tick on multiples of their period on the machine's clock, so loops of one period tick together whenever they started; <code>phase_us</code> moves one along its period.</li>
+    <li><strong>Waiting</strong>: a node sleeps on a futex (~5 µs a hop), spins (~0.5 µs, a whole core), or spins only around when its inputs are due (~1 µs, a few percent of a core).</li>
+  </ul>
+  <p class="note">In full: <a href="https://github.com/montmejat/keel/blob/main/docs/control.md">docs/control.md</a>; decisions <a href="https://github.com/montmejat/keel/blob/main/docs/decisions/0021-control-layer.md">0021</a>, <a href="https://github.com/montmejat/keel/blob/main/docs/decisions/0027-same-cycle.md">0027</a>, <a href="https://github.com/montmejat/keel/blob/main/docs/decisions/0028-stamps.md">0028</a>, <a href="https://github.com/montmejat/keel/blob/main/docs/decisions/0029-phases.md">0029</a>.</p>
+</article>
+
+<article class="chapter" id="drivers" data-part="keel">
+  <header>
+    <div class="eyebrow"><span class="mag">keel</span><span>keel-control</span></div>
+    <h1>Joints and drivers</h1>
+    <p class="lede">A driver is what its joints need: count, start, read, write, stop. One loop runs any of them.</p>
+  </header>
+<pre class="code">pub trait Joints {
+    fn count(&amp;self) -> usize;
+    fn check(&amp;mut self) -> io::Result&lt;()&gt; { Ok(()) }   <span class="c">// for keel doctor: do the drives answer?</span>
+    fn start(&amp;mut self) -> io::Result&lt;()&gt; { Ok(()) }   <span class="c">// modes, enable</span>
+    <span class="c">/// Every joint's state and the moment it describes, once there's a whole one.</span>
+    fn read(&amp;mut self, states: &amp;mut [State]) -> io::Result&lt;Option&lt;u64&gt;&gt;;
+    <span class="c">/// This cycle's commands, the newest there are; None before the controller's first.</span>
+    fn write(&amp;mut self, commands: Option&lt;&amp;[Command]&gt;, states: &amp;[State]) -> io::Result&lt;()&gt;;
+    fn stop(&amp;mut self) -> io::Result&lt;()&gt; { Ok(()) }    <span class="c">// disable</span>
+}
+
+JointLoop::new(joints, Settings::from_args()?, &amp;node)?.run(&amp;mut node)</pre>
+  <p><code>JointLoop</code> is everything else, written once: the tick, publishing the state, waiting for its command within the cycle, one write per cycle (the previous command again when the controller is late), the log lines for late commands and silent joints, and <code>stop</code> however the loop ends. (<a href="https://github.com/montmejat/keel/blob/main/docs/decisions/0032-a-loop-for-any-joints.md">Decision 0032</a>.)</p>
+  <h2>Three drivers</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Driver</th><th>Node</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>damiao::DamiaoJoints</code></td><td><code>keel-can --protocol damiao</code></td><td>Damiao's motors in MIT mode; the loop closes on the motors. Below.</td></tr>
+        <tr><td><code>can::CanJoints</code></td><td><code>keel-can</code> (default)</td><td>made-up drives (<code>keel-can-motor</code>'s): a torque frame and a state frame per joint; the command's law worked out here once a cycle</td></tr>
+        <tr><td><code>plant::Pendulums</code></td><td><code>keel-sim</code></td><td>pendulums stepped a period at a time, stamped with the simulation's time; lockstep possible</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>Damiao's motors, from keel's side</h2>
+  <ol>
+    <li><strong>Start</strong>: for each motor in <code>--motors</code> (its id and the id it answers on, in joint order), one request at a time: write <code>CTRL_MODE = 1</code> (MIT) and check the answer says 1; read <code>PMAX</code>, <code>VMAX</code>, <code>TMAX</code>, the ranges values are packed into. A motor that doesn't answer within 100 ms is asked again until it does, with one line in the log ("waiting for motor 0x01 on `vcan0` … is the robot, or drydock, running?"): the robot may be started after keel. Then enable all.</li>
+    <li><strong>Each cycle</strong>: one round, a frame to each motor. The motors speak only when spoken to, and answer each frame with their state; those answers are the next cycle's <code>state</code>, stamped with when their round went out.</li>
+    <li><strong>Before the first command</strong>: the round asks for feedback (<code>0x7FF … CC</code>) without commanding anything.</li>
+    <li><strong>Errors</strong> in a motor's status (overheating, communication lost…) and changes of status go to the log, once each.</li>
+    <li><strong>Stop</strong>: disable all, however the dataflow ended (except SIGKILL).</li>
+  </ol>
+  <div class="callout">
+    <p><strong>Why read ranges from the motors?</strong> They're per-motor settings, and the published tables disagree: OpenArm's driver packs a DM4340's velocity into ±10 rad/s, Damiao's reference driver into ±8. A table would be wrong for one of them; the motor isn't.</p>
+  </div>
+  <h2>Writing a driver</h2>
+  <p>Another vendor's motors, a serial servo bus, EtherCAT: implement <code>Joints</code> in <code>keel-control</code>, and add two lines to a node's <code>main</code>. The cycle's behaviour, and its fixes, come with <code>JointLoop</code>. Drivers belong in the library, binaries are wiring.</p>
+</article>
+
+<article class="chapter" id="controllers" data-part="keel">
+  <header>
+    <div class="eyebrow"><span class="mag">keel</span><span>tutorial</span></div>
+    <h1>Writing a controller</h1>
+    <p class="lede">A node with a <code>state</code> input and a <code>command</code> output, which answers each state while it holds it.</p>
+  </header>
+  <p>This is <code>examples/openarm/src/main.rs</code>, cut to its loop: OpenArm's home pose with openarm_ros2's gains, the first joint swinging, the gripper working.</p>
+<pre class="code">let mut node = Node::from_env()?;
+let (mut started, mut commands) = (None, Vec::new());
+while let Event::Input { data, .. } = node.next_event()? {
+    let now = data.stamp_ns();                                  <span class="c">// time from the stamp, never the clock</span>
+    let t = (now - *started.get_or_insert(now)) as f64 / 1e9;
+    let states: Vec&lt;State&gt; = State::read(&amp;data).collect();
+    commands.clear();
+    for i in 0..states.len() {
+        let (position, velocity) = match i {
+            0 => (0.4 * (TAU * 0.25 * t).sin(), 0.4 * TAU * 0.25 * (TAU * 0.25 * t).cos()),
+            7 => (if t % 4.0 &lt; 2.0 { 0.0 } else { CLOSED }, 0.0),
+            _ => (HOME[i], 0.0),
+        };
+        commands.push(Command { position, velocity, kp: KP[i], kd: KD[i], effort: 0.0 });
+    }
+    <span class="c">// Sent while `data` is held: the command answers this state, within its cycle.</span>
+    node.send_with("command", commands.len() * Command::LEN, |p| Command::write(&amp;commands, p))?;
+}</pre>
+  <h2>Three rules</h2>
+  <ol>
+    <li><strong>Send while holding the state</strong> (or with <code>send_caused_by</code>). A command sent after the state is dropped answers nothing: the joints wait for their deadline every cycle. Such a controller wants <code>--cycle next</code>.</li>
+    <li><strong>Take time from stamps.</strong> Then lockstep, replay and the robot look the same to it.</li>
+    <li><strong>Know nothing of what's behind the joints.</strong> If a controller needs to know, the messages are missing something.</li>
+  </ol>
+  <h2>Where the loop closes</h2>
+  <p>With MIT commands, a controller chooses per joint and per cycle: send targets and gains and let the drives close a stiff loop at their own rate, or send <code>kp = kd = 0</code> with a torque and close the loop itself at the bus's rate. The first is what an arm on CAN wants: the bus carries setpoints at hundreds of hertz, the drive holds them at tens of kilohertz. The second is whole-body control, model-based torque: then the bus's rate is the loop's rate (see <a href="#bandwidth">bandwidth</a>).</p>
+  <p class="note">The PID (<code>keel-pid</code>) is the other example: it sends plain torques, closing its loop in keel against <code>keel-sim</code>'s pendulums or <code>keel-can-motor</code>.</p>
+</article>
+
+<article class="chapter" id="beyond" data-part="keel">
+  <header>
+    <div class="eyebrow"><span class="mag">keel</span><span>the rest of the stack</span></div>
+    <h1>Machines, deployment, agents</h1>
+    <p class="lede">What keel does around a dataflow: where it runs, how code gets there, how it's checked, and how an agent can look at it. Short here; each has its own page in <code>docs/</code>.</p>
+  </header>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Area</th><th>What you type</th><th>In short</th><th>Read</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Machines</td><td><code>keel daemon</code> · <code>provision</code> · <code>image</code></td><td>a daemon per machine; installed over SSH as a systemd service with real-time limits and a shared token; or booted as process 1 from a 4.5 MB initramfs</td><td><a href="https://github.com/montmejat/keel/blob/main/docs/machines.md">machines</a></td></tr>
+        <tr><td class="name">Deployment</td><td><code>keel deploy</code> · <code>rollback</code> · <code>update</code> · <code>branch</code></td><td>nodes with <code>build:</code> are built as reproducible static binaries, named by their SHA-256, shipped only where missing; history, rollback, rolling updates, branches</td><td><a href="https://github.com/montmejat/keel/blob/main/docs/deployment.md">deployment</a></td></tr>
+        <tr><td class="name">Fleets</td><td><code>keel fleet run | update | status</code></td><td>several robots running one dataflow; new code to some first (<code>--only</code>)</td><td><a href="https://github.com/montmejat/keel/blob/main/docs/deployment.md">deployment</a></td></tr>
+        <tr><td class="name">Diagnostics</td><td><code>keel doctor</code></td><td>is this machine fit for a robot (real-time settings, memory, clock, token), and, for a dataflow, what each node needs: each node's setup runs in check mode, and says what's missing with the command to fix it</td><td><a href="https://github.com/montmejat/keel/blob/main/docs/machines.md">machines</a></td></tr>
+        <tr><td class="name">Microcontrollers</td><td><code>keel-micro</code> · <code>keel-serial</code></td><td>a <code>no_std</code> node on a chip, over a serial link, with a stand-in node on the host</td><td><a href="https://github.com/montmejat/keel/blob/main/docs/control.md">control</a></td></tr>
+        <tr><td class="name">Agents</td><td><code>keel-mcp</code> · <code>keel approve | deny</code></td><td>an MCP server: <code>dataflows</code>, <code>status</code>, <code>logs</code>, <code>latency</code>, <code>doctor</code> to look; <code>restart_node</code>, <code>stop</code> to act, each waiting for a person to approve</td><td><a href="https://github.com/montmejat/keel/blob/main/docs/decisions/0030-agent-tools.md">0030</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <p><strong>Agents and drydock.</strong> <code>examples/agent/run.sh</code> breaks a dataflow on purpose and asks an agent, through <code>keel-mcp</code> only, what's wrong. drydock's <code>--break</code> gives the same kind of exercise a robot: a dead motor, a frozen encoder. See <a href="#recipes">Recipes</a>.</p>
+  </div>
+</article>
+
+<!-- ═══════════════════════════════ DRYDOCK ═══════════════════════════════ -->
+
+<article class="chapter" id="drydock" data-part="drydock">
+  <header>
+    <div class="eyebrow"><span class="mag">drydock</span><span>overview</span></div>
+    <h1>What drydock is</h1>
+    <p class="lede">A robot's motors on virtual CAN buses, their physics simulated in MuJoCo. A bus master talks to it as it would to the real motors.</p>
+  </header>
+  <p>Most simulators draw their line above the driver: the robot's software talks to the simulator through an adapter of its own (a Python API, a TCP protocol), and the driver code only ever runs on the robot. drydock draws its line at the bus. Everything above it is the robot's own software, unchanged; drydock is the part a simulator usually leaves out.</p>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th></th><th>What</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Real</td><td>the bus master and its driver library, its socket calls, its threads and timing on the host, its handling of every answer</td></tr>
+        <tr><td class="name">Modelled</td><td>each motor's firmware (answers, states, registers, timeout, MIT law), its torque limit and transmission, its encoder's errors and its faults, the bus's timing (frame lengths, arbitration), the robot's mechanics (MuJoCo, from the robot's own model)</td></tr>
+        <tr><td class="name">Absent</td><td>the bus's electrical faults (error frames, bus-off), Damiao's other control modes, thermals, power</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>Using it</h2>
+<pre class="code">drydock &lt;robot.yml&gt; [--lockstep &lt;hz&gt;] [--break &lt;joint&gt;:&lt;fault&gt;]...</pre>
+  <ul>
+    <li><strong>The robot file</strong> names a MuJoCo scene and the buses that drive it: <a href="#robot-files">Robot files</a>.</li>
+    <li><strong>In real time</strong> (the default), frames take as long as on a real bus; <strong>in lockstep</strong>, time follows the bus masters' cycles: <a href="#time">Time and the bus</a>.</li>
+    <li><strong>Motors break</strong> on a flag: <a href="#faults">Encoders and faults</a>.</li>
+  </ul>
+  <h2>Its examples</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Example</th><th>Robot</th><th>Bus master</th></tr></thead>
+      <tbody>
+        <tr><td><code>examples/arm</code></td><td>a two-joint arm, DM4340 and DM4310, classic CAN</td><td><code>cargo run --release --example wave -- examples/arm/robot.yml</code></td></tr>
+        <tr><td><code>examples/openarm</code></td><td>OpenArm v1 (Enactic's model), eight motors, CAN FD</td><td><code>examples/openarm/hold [seconds] [--classic]</code>, on OpenArm's own <code>openarm_can</code>; or keel</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><code>cargo test</code> runs 37 tests, the arm in MuJoCo frame by frame among them; MuJoCo must be installed (the build says how).</p>
+</article>
+
+<article class="chapter" id="robot-files" data-part="drydock">
+  <header>
+    <div class="eyebrow"><span class="mag">drydock</span><span>reference</span></div>
+    <h1>Robot files</h1>
+    <p class="lede">A robot is two files. The scene (MJCF) says how it moves; the robot file says what drives it.</p>
+  </header>
+<pre class="code">scene:                                  <span class="c"># the robot's own MuJoCo model, fetched once (or a file next to this one)</span>
+  git: https://github.com/enactic/openarm_mujoco
+  commit: a3c8a57ec15d385e3c1dbd3fd090ee486b7f258c
+  file: v1/openarm.xml
+keyframe: home                          <span class="c"># optional: where it starts</span>
+seed: 0                                 <span class="c"># optional: for the encoders' noise</span>
+buses:
+  - can: vcan0                          <span class="c"># the interface</span>
+    fd: true                            <span class="c"># motors on CAN FD (classic by default)</span>
+    bitrate: 1000000                    <span class="c"># optional, 1 Mbit/s</span>
+    data_bitrate: 5000000               <span class="c"># optional, CAN FD's data phase, 5 Mbit/s</span>
+    reply_us: 0                         <span class="c"># optional: from a frame landing to its answer being ready</span>
+    motors:
+      - { joint: openarm_joint1, model: DM8009, id: 0x01, master_id: 0x11 }
+      - { joint: openarm_joint3, model: DM4340, id: 0x03, master_id: 0x13, limits: { v: 10 } }
+      - joint: openarm_finger_joint1
+        model: DM4310
+        id: 0x08
+        master_id: 0x18
+        transmission: { ratio: 0.042017, offset: 0.044 }
+      - { joint: wrist, model: DM4310, id: 0x05, master_id: 0x15,
+          encoder: { noise: 0.0005, quantum: 0.0004 }, fault: freeze@10, timeout_ms: 100, peak_torque: 7 }</pre>
+  <h2>A bus</h2>
+  <dl class="kv">
+    <dt>can</dt><dd>the SocketCAN interface. One bus per arm is common; ids are per bus, so two arms may share them.</dd>
+    <dt>fd</dt><dd>motors on CAN FD answer in it and understand classic frames too; motors on classic CAN ignore CAN FD frames, with a note (a real bus would carry error frames). The interface must carry CAN FD (MTU 72).</dd>
+    <dt>bitrate, data_bitrate</dt><dd>how fast frames cross, in real time.</dd>
+    <dt>reply_us</dt><dd>a motor's own delay before answering. Unknown for Damiao's motors, so none by default.</dd>
+  </dl>
+  <h2>A motor</h2>
+  <dl class="kv">
+    <dt>joint</dt><dd>a hinge or slide joint in the scene. The scene's own actuators on it are silenced (zero gain and bias): the motor drives it now.</dd>
+    <dt>model</dt><dd>DM3507, DM4310, DM4310_48V, DM4340, DM4340_48V, DM6006, DM8006, DM8009, DM10010L, DM10010, DMH3510, DMH6215, DMG6220: sets PMAX, VMAX, TMAX to the factory's.</dd>
+    <dt>id, master_id</dt><dd>where commands go, where answers come from (11-bit, below <code>0x7FF</code>).</dd>
+    <dt>limits</dt><dd><code>{ p, v, t }</code>: any of PMAX, VMAX, TMAX that differ from the model's. They're registers; a bus master can read them.</dd>
+    <dt>peak_torque</dt><dd>the most torque it gives, N m. TMAX by default, which is only a packing range: a DM-J4310 peaks at 7 N m, not 10.</dd>
+    <dt>timeout_ms</dt><dd>without a frame this long, it disables itself with status D (communication lost). Off by default, as from the factory.</dd>
+    <dt>transmission</dt><dd><code>{ ratio, offset }</code>: the joint is at <code>offset + ratio θ</code> when the motor is at θ; a motor torque τ puts <code>τ / ratio</code> on the joint. OpenArm's gripper motor turns, its fingers slide: 0.042 m per rad, as OpenArm's own driver assumes.</dd>
+    <dt>encoder, fault</dt><dd>what its encoder gets wrong, and how and when it breaks: <a href="#faults">Encoders and faults</a>.</dd>
+  </dl>
+  <div class="callout dock">
+    <p><strong>The split is the point.</strong> The scene is the mechanics (links, masses, rotor inertia as <code>armature</code>, damping, friction), unchanged from whoever published it: OpenArm's comes from Enactic's <code>openarm_mujoco</code>, MuJoCo Menagerie's models work as they are. The motors' behaviour stays out of the scene, where it would have to be faked with MuJoCo actuators.</p>
+  </div>
+</article>
+
+<article class="chapter" id="damiao" data-part="drydock">
+  <header>
+    <div class="eyebrow"><span class="mag">drydock</span><span>protocol</span></div>
+    <h1>Damiao's motors</h1>
+    <p class="lede">One protocol, spoken completely: Damiao's motors in MIT mode, frame for frame against Damiao's reference driver and OpenArm's library.</p>
+  </header>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Frame</th><th>To</th><th>What drydock's motor does</th></tr></thead>
+      <tbody>
+        <tr><td>MIT command</td><td><code>id</code></td><td>takes it while enabled; applies <code>kp (p − θ) + kd (v − θ̇) + τ</code> every physics step, within its peak torque; answers with feedback</td></tr>
+        <tr><td><code>FF…FC</code> enable</td><td><code>id</code></td><td>enabled, from no command (zero gains, zero torque); a motor in error stays in it</td></tr>
+        <tr><td><code>FF…FD</code> disable</td><td><code>id</code></td><td>disabled: no torque</td></tr>
+        <tr><td><code>FF…FE</code> zero</td><td><code>id</code></td><td>the present position reads as zero from now</td></tr>
+        <tr><td><code>FF…FB</code> clear error</td><td><code>id</code></td><td>out of error, disabled</td></tr>
+        <tr><td>register read <code>33</code>, write <code>55</code></td><td><code>0x7FF</code></td><td>answers on its master id with the register's value after it: <code>MST_ID</code> (7), <code>ESC_ID</code> (8), <code>CTRL_MODE</code> (10), <code>PMAX</code> (21), <code>VMAX</code> (22), <code>TMAX</code> (23). Others: no answer, a note</td></tr>
+        <tr><td>refresh <code>CC</code>, save <code>AA</code></td><td><code>0x7FF</code></td><td>refresh answers with feedback; save answers nothing</td></tr>
+        <tr><td>other modes</td><td><code>id + 0x100/0x200/0x300</code></td><td>ignored, with a note: only MIT mode is simulated</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>Choices that matter to a driver</h2>
+  <ul>
+    <li><strong>Every frame to a motor is answered</strong>, with the state of the moment it landed, as the real motors do.</li>
+    <li><strong>Unknown registers get no answer.</strong> A made-up value would let a driver believe something false; a missing answer is a failure the driver already handles.</li>
+    <li><strong>Refused writes answer with the kept value.</strong> Writing another mode to <code>CTRL_MODE</code> answers 1; a driver that checks its writes (both reference drivers do) finds out.</li>
+    <li><strong>Packing is the real packing</strong>: 16 bits of position, 12 of velocity, gains and torque, clamped to their ranges. So a 12-bit field has no exact zero: an idle motor reports −0.005 N m on a ±10 N m range, as a real one would.</li>
+    <li><strong>Temperatures</strong> are always 25 °C; there's no thermal model.</li>
+  </ul>
+  <p class="note">The frames themselves are drawn in <a href="#wire">The wire between them</a> and listed in <a href="#layouts">Messages and frames</a>.</p>
+</article>
+
+<article class="chapter" id="time" data-part="drydock">
+  <header>
+    <div class="eyebrow"><span class="mag">drydock</span><span>clock</span></div>
+    <h1>Time and the bus</h1>
+    <p class="lede">In real time, frames take as long as they would on a real bus. In lockstep, time follows the bus masters.</p>
+  </header>
+  <h2>Real time, with bus timing</h2>
+  <p>A physics step runs each timestep of the wall clock (the scene's <code>&lt;option timestep&gt;</code>, 1 ms for OpenArm). Between steps, frames cross the bus as on a real one:</p>
+  <ol>
+    <li>A frame from the master waits for the bus. When the bus frees, the waiting frame with the <strong>lowest id</strong> goes first: arbitration. A master's commands (ids 0x01–0x08) go before the motors' answers (0x11–0x18).</li>
+    <li>It takes as long as its <strong>bits</strong>, counted as ISO 11898-1 lays them out: the CRC, the stuff bits (one after any five equal bits), CAN FD's data phase at the faster rate.</li>
+    <li>When it's across, its motor acts on it, and the answer queues in turn.</li>
+  </ol>
+<pre class="code">drydock: vcan0: busy 96% of the last 1.0 s; frames waited up to 0.85 ms for it</pre>
+  <p>A bus kept busy (90% of a second, or a frame waiting a millisecond) says so once a second. That line is OpenArm on classic CAN at 500 Hz: it just fits. Falling more than 100 ms behind the wall clock is said and forgiven, not caught up.</p>
+  <h2>Lockstep</h2>
+  <p><code>--lockstep &lt;hz&gt;</code>: physics advances <code>1/hz</code> seconds once every motor, on every bus, has had a frame since the last advance. Answers go out at once, with the state before the advance, so a master sending each motor a command a cycle reads, a cycle later, what its commands did. Runs repeat frame for frame and go as fast as the masters; frames take no time. A master that leaves a motor out of its cycles stalls time.</p>
+  <div class="callout wait">
+    <p><strong>Why not a clock protocol?</strong> CANopen's SYNC would have been one, but Damiao's motors don't speak it, and a master shouldn't have to change to be simulated. "Every motor has heard from its master" needs nothing on the wire.</p>
+  </div>
+</article>
+
+<article class="chapter" id="faults" data-part="drydock">
+  <header>
+    <div class="eyebrow"><span class="mag">drydock</span><span>effects</span></div>
+    <h1>Encoders and faults</h1>
+    <p class="lede">Real motors read their angle imperfectly, and break. drydock's do too, seeded, so a run that finds a problem repeats.</p>
+  </header>
+  <h2>An encoder</h2>
+<pre class="code">encoder: { delay_ms: 0, bias: 0, drift: 0, noise: 0.0005, quantum: 0.0004 }   <span class="c"># radians; all 0 by default</span></pre>
+  <p>In the order a reading meets them: a <strong>delay</strong> (it shows the joint as it was), a <strong>bias</strong> drawn once, a <strong>drift</strong> that wanders as a random walk, white <strong>noise</strong>, and <strong>counts</strong> (the smallest step it tells apart). The motor's firmware closes its loop on that reading and answers with it: a noisy encoder makes a noisy motor, as on a robot.</p>
+  <h2>Faults</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Fault</th><th>The motor</th><th>What a bus master sees</th></tr></thead>
+      <tbody>
+        <tr><td><code>dead</code></td><td>gives no torque, whatever its firmware asks</td><td>status still "enabled", torque ~0, the joint sagging under gravity</td></tr>
+        <tr><td><code>weak</code></td><td>gives a fifth of it</td><td>the joint sagging further than its gains explain</td></tr>
+        <tr><td><code>freeze</code></td><td>its encoder repeats its last reading</td><td>a position that doesn't move, while the firmware, closing its loop on it, pushes as hard as it may</td></tr>
+        <tr><td><code>noisy</code></td><td>its encoder's noise twentyfold</td><td>jitter in position and torque</td></tr>
+      </tbody>
+    </table>
+  </div>
+<pre class="code">fault: dead@10                                           <span class="c"># in the robot file: 10 simulated seconds in</span>
+drydock robot.yml --break elbow:freeze@10 --break wrist:weak <span class="c"># or on the command line</span></pre>
+  <div class="callout dock">
+    <p><strong>A broken motor says nothing.</strong> It keeps reporting itself enabled, as a dead drive or a frozen encoder does on a real robot. Noticing is the bus master's job: keel's joints loop compares what each joint is told with what it does, marks the joint's state, and says in its log "gives 0.0 N m of the -52.4 asked; +0.87 rad from its target" within a second of OpenArm's elbow dying.</p>
+  </div>
+  <p class="note">From keel's first simulation, where these made a robot's sensors imperfect for its health checks to find. <code>src/effects.rs</code>, and its tests.</p>
+</article>
+
+<article class="chapter" id="inside" data-part="drydock">
+  <header>
+    <div class="eyebrow"><span class="mag">drydock</span><span>internals</span></div>
+    <h1>Inside drydock</h1>
+    <p class="lede">The pieces, what each knows and doesn't, and the way a frame and a step go through them.</p>
+  </header>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Piece</th><th>Knows</th><th>Doesn't</th></tr></thead>
+      <tbody>
+        <tr><td><code>can</code></td><td>frames (classic, CAN FD), a socket per interface</td><td>protocols</td></tr>
+        <tr><td><code>can::timing</code></td><td>a frame's bits at its bus's rates; one bus's queue, in arbitration order</td><td>what frames mean</td></tr>
+        <tr><td><code>run</code></td><td>the clock; which frame crosses when; answers back</td><td>the protocol, the physics</td></tr>
+        <tr><td><code>damiao::protocol</code></td><td>Damiao's frames: bytes ↔ values, the factory ranges</td><td>state, I/O, physics</td></tr>
+        <tr><td><code>damiao::motor</code></td><td>one motor's firmware: states, command, registers, timeout, the torque its law asks for</td><td>what limits that torque, joints, MuJoCo</td></tr>
+        <tr><td><code>damiao::bus</code></td><td>the motors on one bus: whose a frame is, CAN FD or classic, notes</td><td>timing, physics</td></tr>
+        <tr><td><code>drivetrain</code>, <code>effects</code></td><td>peak torque, transmission, encoder, faults</td><td>protocols</td></tr>
+        <tr><td><code>world</code>, <code>shim/world.c</code></td><td>MuJoCo: joints by name, their state, forces, stepping, keyframes, silencing actuators</td><td>motors</td></tr>
+        <tr><td><code>dock</code>, <code>robot</code></td><td>the robot: buses of motors on the world's joints; the robot file</td><td>sockets, clocks</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>A frame's way through, in real time</h2>
+  <ol>
+    <li><code>run</code> reads a frame from a bus's socket and queues it on that bus's timeline.</li>
+    <li>When it's across (above), <code>dock</code> delivers it; <code>damiao::bus</code> finds whose it is.</li>
+    <li>The motor reads its angle through its transmission and encoder, acts on the frame, and answers.</li>
+    <li>The answer queues on the same timeline, ready <code>reply_us</code> later; when it's across, <code>run</code> sends it to the master.</li>
+  </ol>
+  <h2>A step's way through</h2>
+  <ol>
+    <li>For each motor: its joint's angle and velocity, through its transmission, then its encoder.</li>
+    <li>Its law asks for a torque (none unless enabled; error D here if past its timeout).</li>
+    <li>The actuator gives what it can (peak, dead, weak); the motor records it, to report.</li>
+    <li>Through the transmission, it's the force on the joint (MuJoCo's <code>qfrc_applied</code>). MuJoCo steps once.</li>
+  </ol>
+  <h2>Decisions</h2>
+  <ul>
+    <li><strong>MuJoCo's C library through a C shim</strong>: the only code touching MuJoCo's structs is compiled against its headers, so Rust mirrors no struct layout. MuJoCo is linked with an rpath, found at build time in <code>~/.cache/drydock</code> or <code>MUJOCO_DIR</code>.</li>
+    <li><strong>The C library, not MJX or MuJoCo Warp</strong>: one world stepped as the buses ask is a CPU's job. The GPU versions read the same MJCF.</li>
+    <li><strong>The firmware apart from the physics</strong>: limits, noise and faults live in the drivetrain, not in the protocol's code. A second protocol (Dynamixel, for serial servos) would be a sibling of <code>damiao</code> on a sibling of <code>can</code>; the rest serves it as it is.</li>
+  </ul>
+  <p class="note">In full: drydock's <a href="https://github.com/montmejat/drydock/blob/master/docs/architecture.md">docs/architecture.md</a>.</p>
+</article>
+
+<!-- ═══════════════════════════════ TOGETHER ═══════════════════════════════ -->
+
+<article class="chapter" id="wire" data-part="Together">
+  <header>
+    <div class="eyebrow"><span class="mag">Together</span><span>the contract</span></div>
+    <h1>The wire between them</h1>
+    <p class="lede">What keel and drydock share is two 8-byte frames and the rules around them. Each has its own copy.</p>
+  </header>
+  <div class="figure">
+    <div class="scroll">
+      <svg viewBox="0 0 900 236" role="img" aria-label="The MIT command packs a 16-bit position and 12-bit velocity, kp, kd and torque; the answer packs status and id, 16-bit position, 12-bit velocity and torque, and two temperatures.">
+        <text class="t muted" x="120" y="22">byte 0</text>
+        <text class="t muted" x="824" y="22" text-anchor="end">byte 7</text>
+        <g class="grid"><line x1="120" y1="30" x2="120" y2="214"></line><line x1="208" y1="30" x2="208" y2="214"></line><line x1="296" y1="30" x2="296" y2="214"></line><line x1="384" y1="30" x2="384" y2="214"></line><line x1="472" y1="30" x2="472" y2="214"></line><line x1="560" y1="30" x2="560" y2="214"></line><line x1="648" y1="30" x2="648" y2="214"></line><line x1="736" y1="30" x2="736" y2="214"></line><line x1="824" y1="30" x2="824" y2="214"></line></g>
+        <text class="big accent" x="108" y="64" text-anchor="end">command</text>
+        <text class="t muted" x="108" y="82" text-anchor="end">→ 0x01</text>
+        <rect class="box-accent" x="120" y="44" width="176" height="44"></rect><rect class="box-accent" x="296" y="44" width="132" height="44"></rect><rect class="box-accent" x="428" y="44" width="132" height="44"></rect><rect class="box-accent" x="560" y="44" width="132" height="44"></rect><rect class="box-accent" x="692" y="44" width="132" height="44"></rect>
+        <text x="208" y="71" text-anchor="middle">p_des</text><text x="362" y="71" text-anchor="middle">v_des</text><text x="494" y="71" text-anchor="middle">kp</text><text x="626" y="71" text-anchor="middle">kd</text><text x="758" y="71" text-anchor="middle">τ_ff</text>
+        <text class="t muted" x="208" y="106" text-anchor="middle">16 bit, ±PMAX</text><text class="t muted" x="362" y="106" text-anchor="middle">12 bit, ±VMAX</text><text class="t muted" x="494" y="106" text-anchor="middle">12 bit, 0–500</text><text class="t muted" x="626" y="106" text-anchor="middle">12 bit, 0–5</text><text class="t muted" x="758" y="106" text-anchor="middle">12 bit, ±TMAX</text>
+        <text class="big dock" x="108" y="160" text-anchor="end">answer</text>
+        <text class="t muted" x="108" y="178" text-anchor="end">← 0x11</text>
+        <rect class="box-dock" x="120" y="140" width="88" height="44"></rect><rect class="box-dock" x="208" y="140" width="176" height="44"></rect><rect class="box-dock" x="384" y="140" width="132" height="44"></rect><rect class="box-dock" x="516" y="140" width="132" height="44"></rect><rect class="box-dock" x="648" y="140" width="88" height="44"></rect><rect class="box-dock" x="736" y="140" width="88" height="44"></rect>
+        <text x="164" y="167" text-anchor="middle">status|id</text><text x="296" y="167" text-anchor="middle">position</text><text x="450" y="167" text-anchor="middle">velocity</text><text x="582" y="167" text-anchor="middle">torque</text><text x="692" y="167" text-anchor="middle">T drive</text><text x="780" y="167" text-anchor="middle">T coil</text>
+        <text class="t muted" x="164" y="202" text-anchor="middle">4 + 4 bit</text><text class="t muted" x="296" y="202" text-anchor="middle">16 bit</text><text class="t muted" x="450" y="202" text-anchor="middle">12 bit</text><text class="t muted" x="582" y="202" text-anchor="middle">12 bit</text><text class="t muted" x="692" y="202" text-anchor="middle">°C</text><text class="t muted" x="780" y="202" text-anchor="middle">°C</text>
+      </svg>
+    </div>
+    <p class="note">Cobalt: sent by keel-can. Copper: sent by a motor, drydock's or a real one. Ranges come from each motor's PMAX, VMAX and TMAX registers.</p>
+  </div>
+  <h2>Who owns what</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th></th><th>keel</th><th>drydock</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Plays</td><td>the robot's computer</td><td>the robot's motors and body</td></tr>
+        <tr><td class="name">At start</td><td>each motor in MIT mode, ranges read, enabled</td><td>the model loaded, its actuators silenced</td></tr>
+        <tr><td class="name">Each cycle</td><td>publishes the state, waits for the command, sends one round</td><td>carries the round across the bus, answers each frame as it lands</td></tr>
+        <tr><td class="name">Closes the loop</td><td>the controller: targets and gains each cycle</td><td>each motor: its law every physics step</td></tr>
+        <tr><td class="name">Keeps time by</td><td>keel-can's tick; states stamped with their round's time</td><td>the wall clock, or the masters' cycles in lockstep</td></tr>
+        <tr><td class="name">Frame format in</td><td><code>crates/keel-control/src/damiao.rs</code></td><td><code>src/damiao/protocol.rs</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>Invariants</h2>
+  <ul>
+    <li><strong>keel doesn't depend on drydock</strong>, nor on any C library: a robot's stack shouldn't depend on its simulator, and keel ships static binaries.</li>
+    <li><strong>drydock doesn't know keel.</strong> Any bus master works: keel, OpenArm's <code>openarm_can</code>, a Python script on a CAN socket.</li>
+    <li><strong>Both copies of the frame format are tested</strong> against the same reference bytes: an all-zero command packs as <code>7F FF 7F F0 00 00 07 FF</code>. A change to one wants the same change, and test, in the other.</li>
+  </ul>
+</article>
+
+<article class="chapter" id="cycle" data-part="Together">
+  <header>
+    <div class="eyebrow"><span class="mag">Together</span><span>timing</span></div>
+    <h1>One cycle, end to end</h1>
+    <p class="lede">From a state published by keel to the next one, through drydock's bus and motors. OpenArm at 500 Hz.</p>
+  </header>
+  <ol>
+    <li><code>keel-can</code> ticks and publishes the eight joints' state: the previous round's answers, stamped with when that round went out.</li>
+    <li><code>openarm-wave</code> answers within ~15–40 µs with eight MIT commands.</li>
+    <li><code>keel-can</code> sends them, one round, on <code>vcan0</code>.</li>
+    <li>drydock carries them across one at a time; each reaches its motor when its last bit has.</li>
+    <li>Each motor takes its command and answers with position, velocity and torque. The answers cross once the commands have: their ids are higher.</li>
+    <li>Meanwhile MuJoCo steps every millisecond, each motor pushing on its joint.</li>
+    <li>At the next tick, the answers are the state.</li>
+  </ol>
+  <h2>One cycle, measured</h2>
+  <p>The same cycle as it went on a laptop: OpenArm in drydock, keel-can driving it, a recorder listening. Play it, or step through it with the arrows. The timeline zooms with each step: keel's part of the cycle takes a tenth of a millisecond, the bus's most of one.</p>
+  <div class="figure viz" id="fig-cycle" data-viz="cycle" data-run="openarm-dead">
+    <p class="note">This figure is drawn by JavaScript: one 2 ms cycle of OpenArm, measured hop by hop.</p>
+  </div>
+  <p>Every cycle of the same run, frame by frame, traced or not: <a href="run.html">the run, played back</a>.</p>
+  <h2>CAN FD against classic CAN</h2>
+  <p>The same cycle's frames on both buses, to scale: what decides how fast an arm can be driven.</p>
+  <div class="figure">
+    <div class="scroll">
+      <svg viewBox="0 0 900 262" role="img" aria-label="To scale over one 2 ms cycle: on CAN FD the 8 commands and 8 answers take about 0.83 ms, 41 percent; on classic CAN about 1.9 ms, 96 percent.">
+        <g class="grid"><line x1="120" y1="34" x2="120" y2="214"></line><line x1="305" y1="34" x2="305" y2="214"></line><line x1="490" y1="34" x2="490" y2="214"></line><line x1="675" y1="34" x2="675" y2="214"></line><line x1="860" y1="34" x2="860" y2="214"></line></g>
+        <text class="muted" x="120" y="236" text-anchor="middle">0</text><text class="muted" x="305" y="236" text-anchor="middle">0.5</text><text class="muted" x="490" y="236" text-anchor="middle">1.0</text><text class="muted" x="675" y="236" text-anchor="middle">1.5</text><text class="muted" x="860" y="236" text-anchor="middle">2.0 ms</text>
+        <line class="tick" x1="120" y1="26" x2="120" y2="214"></line><line class="tick-dash" x1="860" y1="26" x2="860" y2="214"></line>
+        <text class="t" x="126" y="24">tick: state out</text>
+        <text class="t" x="854" y="24" text-anchor="end">next tick: the answers are the state</text>
+        <text class="t" x="108" y="64" text-anchor="end">keel</text>
+        <rect class="lane" x="120" y="48" width="740" height="26"></rect>
+        <rect class="fill-accent" x="120" y="54" width="8" height="14"></rect>
+        <text class="t" x="136" y="66">controller answers in 15–40 µs, then 8 commands go out</text>
+        <text class="t" x="108" y="114" text-anchor="end">CAN FD</text><text class="t muted" x="108" y="129" text-anchor="end">1 / 5 Mbit/s</text>
+        <rect class="lane" x="120" y="100" width="740" height="34"></rect>
+        <g class="fill-accent"><rect x="129.3" y="106" width="18.2" height="22"></rect><rect x="148.5" y="106" width="18.2" height="22"></rect><rect x="167.7" y="106" width="18.2" height="22"></rect><rect x="186.9" y="106" width="18.2" height="22"></rect><rect x="206.1" y="106" width="18.2" height="22"></rect><rect x="225.3" y="106" width="18.2" height="22"></rect><rect x="244.5" y="106" width="18.2" height="22"></rect><rect x="263.7" y="106" width="18.2" height="22"></rect></g>
+        <g class="fill-dock"><rect x="283.2" y="106" width="18.2" height="22"></rect><rect x="302.4" y="106" width="18.2" height="22"></rect><rect x="321.6" y="106" width="18.2" height="22"></rect><rect x="340.8" y="106" width="18.2" height="22"></rect><rect x="360.0" y="106" width="18.2" height="22"></rect><rect x="379.2" y="106" width="18.2" height="22"></rect><rect x="398.4" y="106" width="18.2" height="22"></rect><rect x="417.6" y="106" width="18.2" height="22"></rect></g>
+        <text class="t" x="448" y="122">41% busy, idle the rest</text>
+        <text class="t" x="108" y="178" text-anchor="end">classic</text><text class="t muted" x="108" y="193" text-anchor="end">1 Mbit/s</text>
+        <rect class="lane" x="120" y="164" width="740" height="34"></rect>
+        <g class="fill-accent"><rect x="129.3" y="170" width="43.4" height="22"></rect><rect x="173.7" y="170" width="43.4" height="22"></rect><rect x="218.1" y="170" width="43.4" height="22"></rect><rect x="262.5" y="170" width="43.4" height="22"></rect><rect x="306.9" y="170" width="43.4" height="22"></rect><rect x="351.3" y="170" width="43.4" height="22"></rect><rect x="395.7" y="170" width="43.4" height="22"></rect><rect x="440.1" y="170" width="43.4" height="22"></rect></g>
+        <g class="fill-dock"><rect x="484.5" y="170" width="43.4" height="22"></rect><rect x="528.9" y="170" width="43.4" height="22"></rect><rect x="573.3" y="170" width="43.4" height="22"></rect><rect x="617.7" y="170" width="43.4" height="22"></rect><rect x="662.1" y="170" width="43.4" height="22"></rect><rect x="706.5" y="170" width="43.4" height="22"></rect><rect x="750.9" y="170" width="43.4" height="22"></rect><rect x="795.3" y="170" width="43.4" height="22"></rect></g>
+        <text class="t accent" x="306" y="160" text-anchor="middle">8 commands</text>
+        <text class="t dock" x="662" y="160" text-anchor="middle">8 answers: 96% busy</text>
+      </svg>
+    </div>
+    <p class="note">To scale. A Damiao frame takes about 52 µs on CAN FD and 120 µs on classic CAN; drydock counts each one's bits and measured the same loads.</p>
+  </div>
+  <h2>What the state's stamp means</h2>
+  <p>The state published at a tick is what the motors said as the previous round landed: about one period old, plus the round's time on the bus. Its stamp is when that round went out, the closest moment keel knows to when the motors measured. A fresher state needs a second round within the cycle, at twice the bus load; it's on keel's list.</p>
+</article>
+
+<article class="chapter" id="dies" data-part="Together">
+  <header>
+    <div class="eyebrow"><span class="mag">Together</span><span>a recorded run</span></div>
+    <h1>A motor dies, replayed</h1>
+    <p class="lede">OpenArm waving, until drydock kills the elbow's drive. What keel saw, joint by joint, and what it said.</p>
+  </header>
+  <p>drydock ran with <code>--break openarm_joint4:dead@6</code>: six seconds after it started (5.3 s on this figure's clock, which starts at keel's first state), the elbow's drive stops giving torque. It goes on answering every command, on time, with its position and a torque of zero, as a drive whose power stage failed would. The bus doesn't notice: it stays 41% busy.</p>
+  <div class="figure viz" id="fig-replay" data-viz="replay" data-run="openarm-dead">
+    <p class="note">This figure is drawn by JavaScript: the whole run, joint by joint, with what keel-can's log said.</p>
+  </div>
+  <p>The same run at full rate, every frame, state, command and flag on one clock, played at 0.1 ms a second up to real time: <a href="run.html">the run, played back</a>.</p>
+  <h2>What to look at</h2>
+  <ul>
+    <li><strong>5.3 s</strong>: J4's torque drops to zero, and the elbow falls under gravity to its stop, 2.44 rad, in 0.3 s.</li>
+    <li>As it falls, the torque asked grows: the command's law, kp × (target − position) + kd × (velocity asked − velocity), pushes harder the further the joint is from its target. It settles at −52.4 N m, more than a DM4340's 28 N m peak.</li>
+    <li><strong>5.8 s</strong>: after half a second of giving less than 30% of what it's asked, keel-can's loop marks J4 <em>underpowered</em> in its state, and says so in its log with the numbers.</li>
+    <li><strong>5.9 s</strong>: and <em>behind</em>: 0.87 rad from its target for half a second.</li>
+    <li>The other joints carry on. J1 still swings and the gripper still opens and closes. No node stops or slows down.</li>
+  </ul>
+  <p>The flags travel in the state, so the controller, the recorder and a replay all see them. The log says it in words, which is what an agent found through <code>keel-mcp</code> in the agent scenarios (<a href="#beyond">Machines, deployment, agents</a>).</p>
+  <h2>Where the figure comes from</h2>
+  <p>A run of <code>examples/openarm.yml</code> with a <code>keel-recorder</code> node added, drydock writing every frame with <code>--trace</code>, and <code>keel trace --export</code> for the sampled traces. <code>keel-book</code>, a small Rust program beside the book, reads the three with keel's own readers and writes the file the figures draw from. Every number is from that run.</p>
+</article>
+
+<article class="chapter" id="bandwidth" data-part="Together">
+  <header>
+    <div class="eyebrow"><span class="mag">Together</span><span>physics of the bus</span></div>
+    <h1>CAN, CAN FD and bandwidth</h1>
+    <p class="lede">Why eight motors fit at 1 kHz on CAN FD and not on classic CAN, what sets the limit, and what to do with a longer chain.</p>
+  </header>
+  <h2>A frame's two speeds</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>An 8-byte Damiao frame</th><th>Classic, 1 Mbit/s</th><th>CAN FD, 1 + 5 Mbit/s</th></tr></thead>
+      <tbody>
+        <tr><td>Header and tail (id, arbitration, ACK, end)</td><td class="num">~47 bits, 1 Mbit/s</td><td class="num">~30 bits, 1 Mbit/s</td></tr>
+        <tr><td>Data, CRC, stuffing</td><td class="num">~64–88 bits, 1 Mbit/s</td><td class="num">~96–113 bits, 5 Mbit/s</td></tr>
+        <tr><td>One frame</td><td class="num">111–135 µs</td><td class="num">~49–57 µs</td></tr>
+        <tr><td>A cycle of 8 motors (16 frames)</td><td class="num">1.8–2.2 ms</td><td class="num">0.8–0.9 ms</td></tr>
+        <tr><td>Bus load at 500 Hz</td><td class="num">90–110%</td><td class="num">~41%</td></tr>
+        <tr><td>Bus load at 1 kHz</td><td class="num">doesn't fit</td><td class="num">~82%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>What sets the limit</h2>
+  <p>CAN has no master. In every bit of a frame's header, every node takes part: two nodes starting at once both watch the wire, and the one sending a 1 that reads back a 0 has lost and stops (arbitration); receivers acknowledge a frame by driving a bit of that same frame. So one bit time must cover the signal's round trip on the cable (about 5 ns per metre each way) and each transceiver's delay (100–250 ns). Bit rate times bus length is about constant:</p>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Nominal rate</th><th>Bus length, roughly</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1 Mbit/s</td><td>~40 m (25 m in practice)</td></tr>
+        <tr><td class="num">500 kbit/s</td><td>~100 m</td></tr>
+        <tr><td class="num">250 kbit/s</td><td>~250 m</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>CAN FD's trick: after arbitration one node transmits alone, so its data phase needs no round trip and can go faster, limited by signal quality (2–5 Mbit/s, 8 with newer transceivers). The header can't, and for 8-byte payloads it's about 60% of a frame. The useful bandwidth is small: about 1.2 Mbit/s of payload on CAN FD, 0.5 on classic.</p>
+  <h2>A longer chain</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Motors on one CAN FD bus</th><th>Bus time per cycle</th><th>Fastest loop</th></tr></thead>
+      <tbody>
+        <tr><td class="num">8 (an arm)</td><td class="num">~0.83 ms</td><td class="num">~1.2 kHz</td></tr>
+        <tr><td class="num">15</td><td class="num">~1.6 ms</td><td class="num">~640 Hz</td></tr>
+        <tr><td class="num">30 (a humanoid)</td><td class="num">~3.1 ms</td><td class="num">~320 Hz</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul>
+    <li><strong>More buses</strong>: a bus per limb, on a multi-channel adapter. drydock's robot files take several; keel's controller waiting for every bus's state each cycle is still to do.</li>
+    <li><strong>Fewer frames</strong>: some motors take one frame for several (DJI's M3508, four at a time). Damiao's don't.</li>
+    <li><strong>A faster bus</strong>: EtherCAT, 100 Mbit/s full duplex, one frame passing through every drive as each reads and writes its part. 100 µs cycles for dozens of axes: what fast industrial arms and many humanoids use.</li>
+    <li><strong>Check the adapter</strong>: a full-speed USB-CAN adapter moves data every 1 ms, which caps a round trip before the bus does; high-speed USB, every 125 µs.</li>
+  </ul>
+  <div class="callout">
+    <p><strong>Does 1 kHz matter?</strong> With MIT commands, the stiff loop runs inside each motor, much faster than the bus; the bus carries setpoints and gains, and a few hundred hertz is plenty for an arm. It matters when the computer closes the loop itself, with pure torques: then the bus's rate is the loop's.</p>
+  </div>
+</article>
+
+<article class="chapter" id="recipes" data-part="Together">
+  <header>
+    <div class="eyebrow"><span class="mag">Together</span><span>how-to</span></div>
+    <h1>Recipes</h1>
+    <p class="lede">Short paths for the things you'll want to do next.</p>
+  </header>
+  <h2>A new robot</h2>
+  <ol>
+    <li>Find or write its MJCF. MuJoCo Menagerie has many (I2RT's YAM arm, on DM4340 and DM4310, is in it). Keep it unchanged; drydock silences its actuators on driven joints.</li>
+    <li>Write a robot file next to it: a bus, and a motor per driven joint, with its model, ids, and any limits, transmission or peak torque.</li>
+    <li>Run drydock on it, and talk to it first with something simple: drydock's <code>wave</code> example takes any robot file (<code>cargo run --release --example wave -- my/robot.yml</code>), and swings every motor on the first bus.</li>
+    <li>In keel, a dataflow with <code>keel-can --protocol damiao --motors id:master,…</code> and your controller; copy <code>examples/openarm.yml</code>.</li>
+  </ol>
+  <h2>Break a motor, and see what keel sees</h2>
+<pre class="code"><span class="c"># drydock</span>
+./target/release/drydock examples/openarm/robot.yml --break openarm_joint4:dead@5
+<span class="c"># keel</span>
+./target/debug/keel run examples/openarm.yml
+./target/debug/keel logs arm              <span class="c"># "joint 4 (openarm_joint4): gives 0.0 N m of the -52.4 asked; +0.87 rad from its target (1.57)"</span></pre>
+  <p>Try <code>freeze</code> too: the reported position stops moving, and the motor pushes its full torque against what it thinks is an error. The arm's node says that too: "its position reads 0.160 rad, unchanged for 0.6 s, while its target went to 0.39". And <code>examples/agent/run.sh openarm-dead</code> (<code>-weak</code>, <code>-freeze</code>, <code>-healthy</code>) asks an agent what's wrong, with keel's tools only, and grades its answer.</p>
+  <h2>Repeatable, faster than real time</h2>
+  <p>Run drydock with <code>--lockstep 500</code>: physics advances 2 ms each time every motor has had a frame. keel-can keeps time itself, so the run goes at keel's pace; with a bus master that sends as fast as answers come, it goes as fast as both can. Two lockstep runs give the same frames, noise included (it's seeded).</p>
+  <h2>Classic CAN, to see the limit</h2>
+  <p>Set the bus's <code>fd: false</code> in a copy of OpenArm's robot file, and give keel-can <code>--fd false</code>. At 500 Hz drydock reports the bus 96% busy; at 1 kHz states stop coming whole, and keel-can says so.</p>
+  <h2>On the real arm</h2>
+<pre class="code">sudo ip link set can0 type can bitrate 1000000 dbitrate 5000000 fd on
+sudo ip link set can0 up
+<span class="c"># or OpenArm's own tool: openarm-can-configure-socketcan can0 -fd</span></pre>
+  <p>Then, in <code>examples/openarm.yml</code>, <code>--interface can0</code>. Nothing else changes. Before trusting a controller on hardware, run it against drydock with the faults it might meet.</p>
+</article>
+
+<article class="chapter" id="troubleshooting" data-part="Together">
+  <header>
+    <div class="eyebrow"><span class="mag">Together</span><span>when it doesn't work</span></div>
+    <h1>Troubleshooting</h1>
+    <p class="lede">What it says, what's wrong, what to do.</p>
+  </header>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>You see</th><th>Because</th><th>Do</th></tr></thead>
+      <tbody>
+        <tr><td><code>no CAN interface `vcan0`</code></td><td>the virtual bus doesn't exist (it doesn't survive a reboot)</td><td>the command that follows the message: <code>sudo ip link add dev vcan0 type vcan &amp;&amp; sudo ip link set vcan0 mtu 72 up</code></td></tr>
+        <tr><td><code>… on CAN FD, but it carries classic frames only</code></td><td>the interface's MTU is 16</td><td>the command that follows: down, MTU 72, up</td></tr>
+        <tr><td><code>no MuJoCo 3.16.0 in …</code> at build</td><td>drydock links MuJoCo's library</td><td>the download command the build prints, or <code>MUJOCO_DIR=…</code></td></tr>
+        <tr><td><code>waiting for motor 0x01 on `vcan0` …</code> (keel-can)</td><td>drydock isn't running yet, its robot file has other ids, or one side is on CAN FD and the other isn't</td><td>start drydock; compare <code>--motors</code> with the robot file; match <code>--fd</code> with <code>fd:</code>. <code>keel doctor</code> says which motors answer</td></tr>
+        <tr><td><code>no state from every joint for 1s</code></td><td>answers aren't coming back whole: wrong master ids, a motor missing, or a bus too slow for the rate</td><td>check ids; watch drydock's <code>busy</code> lines; lower <code>--hz</code> or use CAN FD</td></tr>
+        <tr><td><code>a CAN FD frame to 0x001, but the motors are on classic CAN</code></td><td>the master is on CAN FD, the robot file isn't</td><td>make them agree</td></tr>
+        <tr><td><code>N of M commands missed the 300µs deadline</code></td><td>the controller was late: a busy machine, no real-time settings</td><td>a few in hundreds is normal on a laptop; <code>rt:</code> in the dataflow, or a longer <code>--deadline-us</code></td></tr>
+        <tr><td><code>busy 96% … waited up to 8.84 ms</code> (drydock)</td><td>the bus is nearly full: classic CAN at 500 Hz</td><td>CAN FD, a lower rate, or a second bus</td></tr>
+        <tr><td>a joint far from where it was told, no error anywhere</td><td>a motor broken on purpose (<code>--break</code>), or gains too low for the load</td><td>drydock's start lines list each motor's faults</td></tr>
+        <tr><td>OpenArm's <code>hold</code>: register answers missing, a position near −12.5 rad</td><td><code>openarm_can</code>'s <code>recv_all</code> reads late answers in the wrong mode</td><td><code>hold</code> lets answers settle during setup; a real-bus problem too</td></tr>
+        <tr><td>keel's motors left enabled after a crash</td><td>a node killed with SIGKILL can't disable them</td><td>stop with <code>keel stop</code> or Ctrl-C; on hardware, a motor timeout (<code>timeout_ms</code>) is the safety net</td></tr>
+      </tbody>
+    </table>
+  </div>
+</article>
+
+<!-- ═══════════════════════════════ REFERENCE ═══════════════════════════════ -->
+
+<article class="chapter" id="flags" data-part="Reference">
+  <header>
+    <div class="eyebrow"><span class="mag">Reference</span><span>CLI</span></div>
+    <h1>Commands and flags</h1>
+    <p class="lede">Every node and tool in this book, with its flags and defaults.</p>
+  </header>
+  <h2>keel's control nodes</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Node</th><th>Flags (defaults)</th></tr></thead>
+      <tbody>
+        <tr><td><code>keel-can</code></td><td><code>--interface can0 --protocol made-up --joints 1 --hz 1000 --cycle same --deadline-us 300 --spin-us 0 --names a,b</code> (and the joints watch's thresholds: --error-rad 0.2 --ratio 0.3 --hold-s 0.5); with <code>--protocol damiao</code>: <code>--motors 0x01:0x11,… --fd false</code></td></tr>
+        <tr><td><code>keel-sim</code></td><td><code>--joints 1 --hz 1000 --cycle same|next|lockstep --deadline-us 300 --spin-us 0</code></td></tr>
+        <tr><td><code>keel-pid</code></td><td><code>--target 1.0 --kp 40 --ki 40 --kd 4 --limit 10 --spin-us 0 --period-us 0</code></td></tr>
+        <tr><td><code>keel-can-motor</code></td><td><code>--interface vcan0 --joints 1 --hz 1000</code></td></tr>
+        <tr><td><code>openarm-wave</code></td><td>none: OpenArm's gains and poses are constants in <code>examples/openarm/src/main.rs</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>drydock</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Command</th><th>Does</th></tr></thead>
+      <tbody>
+        <tr><td><code>drydock &lt;robot.yml&gt;</code></td><td>the robot, in real time</td></tr>
+        <tr><td><code>--lockstep &lt;hz&gt;</code></td><td>1/hz s of physics once every motor has had a frame; must be a whole number of the scene's timesteps</td></tr>
+        <tr><td><code>--break &lt;joint&gt;:&lt;fault&gt;[@s]</code></td><td>dead, weak, freeze, noisy; repeatable</td></tr>
+        <tr><td><code>examples/openarm/hold [s] [--classic]</code></td><td>OpenArm driven by its own library (built as drydock's README says)</td></tr>
+        <tr><td><code>cargo run --release --example wave -- &lt;robot.yml&gt; [--seconds s]</code></td><td>swings every motor on the first bus</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>keel</h2>
+  <p><code>run</code>, <code>stop</code>, <code>ps</code>, <code>logs</code>, <code>top</code>, <code>trace</code>, <code>events</code>, <code>web</code>, <code>restart</code>, <code>approve</code>, <code>deny</code>, <code>recording</code>, <code>replay</code>, <code>export</code>, <code>deploy</code>, <code>update</code>, <code>start</code>, <code>history</code>, <code>rollback</code>, <code>branch</code>, <code>merge</code>, <code>diff</code>, <code>gc</code>, <code>fleet</code>, <code>provision</code>, <code>image</code>, <code>doctor</code>, <code>daemon</code>. <code>keel &lt;command&gt; --help</code> says the rest.</p>
+</article>
+
+<article class="chapter" id="layouts" data-part="Reference">
+  <header>
+    <div class="eyebrow"><span class="mag">Reference</span><span>bytes</span></div>
+    <h1>Messages and frames</h1>
+    <p class="lede">Every layout this book uses, byte by byte.</p>
+  </header>
+  <h2>keel payloads (little-endian, per joint, back to back)</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Message</th><th>Bytes</th><th>Fields</th></tr></thead>
+      <tbody>
+        <tr><td class="name">State</td><td class="num">32</td><td><code>position f64</code> (0), <code>velocity f64</code> (8), <code>effort f64</code> (16), <code>flags u32</code> (24), <code>drive u32</code> (28)</td></tr>
+        <tr><td class="name">Command</td><td class="num">40</td><td><code>position f64</code> (0), <code>velocity f64</code> (8), <code>kp f64</code> (16), <code>kd f64</code> (24), <code>effort f64</code> (32)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>Damiao frames (8 bytes, classic or CAN FD)</h2>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>Frame</th><th>Id</th><th>Bytes</th></tr></thead>
+      <tbody>
+        <tr><td>MIT command</td><td>motor's</td><td><code>p[15:8] p[7:0] v[11:4] v[3:0]|kp[11:8] kp[7:0] kd[11:4] kd[3:0]|t[11:8] t[7:0]</code></td></tr>
+        <tr><td>special</td><td>motor's</td><td><code>FF FF FF FF FF FF FF xx</code>: FC enable, FD disable, FE zero, FB clear error</td></tr>
+        <tr><td>feedback</td><td>master's</td><td><code>status&lt;&lt;4|id&amp;F, p[15:8] p[7:0] v[11:4] v[3:0]|t[11:8] t[7:0] T_mos T_rotor</code></td></tr>
+        <tr><td>register read</td><td><code>0x7FF</code></td><td><code>id_lo id_hi 33 rid 00 00 00 00</code>; answer on master's: <code>id_lo id_hi 33 rid v0 v1 v2 v3</code></td></tr>
+        <tr><td>register write</td><td><code>0x7FF</code></td><td><code>id_lo id_hi 55 rid v0 v1 v2 v3</code>; answered the same way</td></tr>
+        <tr><td>refresh, save</td><td><code>0x7FF</code></td><td><code>id_lo id_hi CC 00…</code>, <code>id_lo id_hi AA 00…</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Packing: <code>uint = (clamp(x, min, max) − min) / (max − min) × (2^bits − 1)</code>, truncated; position ±PMAX in 16 bits; velocity ±VMAX, torque ±TMAX, kp 0–500, kd 0–5 in 12. Register values are little-endian <code>u32</code> for ids and mode (7–10, 13–16, 35–36), <code>f32</code> otherwise.</p>
+  <h2>Statuses</h2>
+  <p><code>0</code> disabled · <code>1</code> enabled · <code>8</code> overvoltage · <code>9</code> undervoltage · <code>A</code> overcurrent · <code>B</code> drive overheated · <code>C</code> coil overheated · <code>D</code> communication lost · <code>E</code> overload. From <code>8</code> up, the motor holds no torque until the error is cleared.</p>
+</article>
+
+<article class="chapter" id="measured" data-part="Reference">
+  <header>
+    <div class="eyebrow"><span class="mag">Reference</span><span>numbers</span></div>
+    <h1>Measured</h1>
+    <p class="lede">The numbers this book quotes, and where they came from. Laptop (Core Ultra 7 155H), no real-time settings, unless said.</p>
+  </header>
+  <div class="scroll tbl">
+    <table class="data">
+      <thead><tr><th>What</th><th>Value</th><th>How</th></tr></thead>
+      <tbody>
+        <tr><td>Round trip between two nodes</td><td class="num">5.6 µs</td><td><code>examples/bench.yml</code>, any payload size</td></tr>
+        <tr><td>One hop, sleeping / spinning</td><td class="num">6.0 / 0.52 µs</td><td><code>examples/hop.yml</code>, p50</td></tr>
+        <tr><td>Pendulum, state → command applied, 1 kHz</td><td class="num">~20 µs</td><td><code>control-sim.yml</code>, <code>keel trace</code></td></tr>
+        <tr><td>Pendulum in lockstep</td><td class="num">~100× real time</td><td>debug build, <code>control-lockstep.yml</code></td></tr>
+        <tr><td>OpenArm, state → command, 500 Hz, CAN FD</td><td class="num">15–40 µs</td><td><code>openarm.yml</code> against drydock</td></tr>
+        <tr><td>OpenArm, commands past the 300 µs deadline</td><td class="num">3 in 500</td><td>same</td></tr>
+        <tr><td>OpenArm bus load, CAN FD, 500 Hz / 1 kHz</td><td class="num">41% / 83%</td><td>drydock's bus timing (predicted 41–45% / 82%)</td></tr>
+        <tr><td>OpenArm bus load, classic, 500 Hz</td><td class="num">96%</td><td>same; frames waited up to 8.8 ms at start</td></tr>
+        <tr><td>OpenArm at 1 kHz, cycles without a whole state</td><td class="num">~5%</td><td>936–958 states/s instead of 1000</td></tr>
+        <tr><td>OpenArm holding its elbow, sag</td><td class="num">0.07 rad</td><td>joint 4 at 1.64 for 1.57, openarm_ros2's gains</td></tr>
+        <tr><td>drydock, 8 register reads answered</td><td class="num">within 64 µs</td><td>without bus timing (it's in real time since)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">keel's own benchmarks, jitter and timing are in <a href="https://github.com/montmejat/keel/blob/main/docs/architecture.md#benchmarks">docs/architecture.md</a>.</p>
+</article>
+
+<article class="chapter" id="glossary" data-part="Reference">
+  <header>
+    <div class="eyebrow"><span class="mag">Reference</span><span>words</span></div>
+    <h1>Glossary</h1>
+  </header>
+  <dl class="kv">
+    <dt>arbitration</dt><dd>how CAN picks the next frame: all waiting senders start at once, and the lowest id wins without a collision.</dd>
+    <dt>bit stuffing</dt><dd>an extra opposite bit after five equal ones, so the bus never goes long without an edge. Makes a frame's length depend on its content.</dd>
+    <dt>BRS</dt><dd>bit rate switch: a CAN FD frame's flag for sending its data at the faster rate.</dd>
+    <dt>CAN FD</dt><dd>CAN with frames up to 64 bytes and a faster data phase. Backward compatible: an FD node reads classic frames.</dd>
+    <dt>controller</dt><dd>the node that answers each state with a command.</dd>
+    <dt>cycle</dt><dd>one period of a joints' loop: state out, command in, one round to the drives.</dd>
+    <dt>dataflow</dt><dd>a YAML file of nodes and the wiring of their inputs.</dd>
+    <dt>drivetrain</dt><dd>in drydock, what's between a motor's firmware and its joint: actuator, transmission, encoder, faults.</dd>
+    <dt>id, master id</dt><dd>a Damiao motor's CAN id, where commands go; and the id its answers go out on.</dd>
+    <dt>keep: latest</dt><dd>an input that only ever holds the newest message; its sender never waits.</dd>
+    <dt>lockstep</dt><dd>a simulation stepping when its controller answers, not on a clock: repeatable, as fast as both go.</dd>
+    <dt>MIT mode</dt><dd>a command of target position, velocity, kp, kd and torque; the drive applies <code>kp·Δp + kd·Δv + τ</code>. After MIT's Mini Cheetah.</dd>
+    <dt>MJCF</dt><dd>MuJoCo's model format: bodies, joints, masses, actuators.</dd>
+    <dt>node</dt><dd>a process in a dataflow.</dd>
+    <dt>phase</dt><dd>where in its period a node's periodic loop ticks.</dd>
+    <dt>PMAX, VMAX, TMAX</dt><dd>a Damiao motor's registers: the ranges position, velocity and torque are packed into.</dd>
+    <dt>round</dt><dd>keel-can's frames of one cycle: a frame to each motor.</dd>
+    <dt>same cycle</dt><dd>acting on a command in the cycle whose state it answers, if it comes before the deadline.</dd>
+    <dt>stamp</dt><dd>the moment of the world a message describes, in its header.</dd>
+    <dt>transmission</dt><dd>how a motor's turning moves its joint: a ratio and an offset.</dd>
+    <dt>vcan0</dt><dd>a virtual CAN interface: frames written to it go to every other socket on it, instantly.</dd>
+  </dl>
+</article>
+
+<article class="chapter" id="agents" data-part="Reference">
+  <header>
+    <div class="eyebrow"><span class="mag">Reference</span><span>for agents</span></div>
+    <h1>For agents</h1>
+    <p class="lede">What an agent working on keel or drydock should know first: where the truth is, how to check a change, and what not to break.</p>
+  </header>
+  <h2>Where the truth is</h2>
+  <ul>
+    <li><strong>keel</strong>: <code>README.md</code>, <code>docs/*.md</code> (one page per layer), <code>docs/decisions/NNNN-*.md</code> (one record per decision: context, decision, consequences; the latest are 0031 and 0032). Code comments explain why, briefly.</li>
+    <li><strong>drydock</strong>: <code>README.md</code> (use), <code>docs/architecture.md</code> (design), module headers in <code>src/</code>.</li>
+    <li><strong>This book</strong> summarises both, and is in one file: <code>site/book.html</code> in keel. When it disagrees with the docs next to the code, they win; fix the book.</li>
+  </ul>
+  <h2>Checking a change</h2>
+<pre class="code"><span class="c"># keel</span>
+cargo build &amp;&amp; cargo clippy --workspace --all-targets &amp;&amp; cargo test --workspace
+cargo test -p keel-control -- --ignored        <span class="c"># needs vcan0</span>
+./target/debug/keel run examples/control-sim.yml      <span class="c"># and control-lockstep, control-can</span>
+<span class="c"># drydock (needs MuJoCo: the build says how)</span>
+cargo fmt --check &amp;&amp; cargo clippy --all-targets &amp;&amp; cargo test
+<span class="c"># both, end to end (vcan0 up)</span>
+keel$    ./target/debug/keel doctor examples/openarm.yml
+drydock$ ./target/release/drydock examples/openarm/robot.yml
+keel$    ./target/debug/keel run examples/openarm.yml &amp;&amp; ./target/debug/keel logs controller</pre>
+  <p>Long-running commands (<code>drydock</code>, <code>keel run</code>) don't exit on their own: run them in the background, with a timeout, and stop them after. A control change isn't done until the examples still behave: the pendulum holds at 1 rad pushing 4.13 N m; OpenArm's joint 4 holds near 1.64 rad.</p>
+  <h2>Invariants</h2>
+  <ul>
+    <li>keel is Rust only, with few dependencies (<a href="https://github.com/montmejat/keel/blob/main/docs/decisions/0010-dependencies.md">0010</a>), no C libraries, and doesn't depend on drydock.</li>
+    <li>The dataflow is the hardware interface: controllers never know what's behind the joints. Drivers implement <code>Joints</code>, in the library; binaries are wiring.</li>
+    <li>Controllers take time from stamps.</li>
+    <li>keel and drydock each keep their own copy of Damiao's frame format, tested against the same bytes.</li>
+    <li>drydock answers only what it simulates; an unknown register gets no answer, not a made-up value.</li>
+    <li>drydock's faults say nothing: don't make a broken motor report an error it wouldn't on hardware.</li>
+  </ul>
+  <h2>Conventions</h2>
+  <ul>
+    <li><strong>Writing</strong>: plain, short sentences; say what something does, not what it is called; no hype. Docs and comments say why.</li>
+    <li><strong>Decisions</strong>: a change of direction in keel gets a record in <code>docs/decisions/</code>, and a row in its README.</li>
+    <li><strong>Formatting</strong>: <code>rustfmt.toml</code> in each repository (120 columns). In keel, format only the files you touched: some existing files aren't formatted, and reformatting them muddies a change.</li>
+    <li><strong>Commits</strong>: a short subject, a body saying what and why. Ask before committing, pushing or deleting.</li>
+  </ul>
+  <h2>Gotchas</h2>
+  <ul>
+    <li><code>vcan0</code> needs root once per boot; some machines refuse unprivileged network namespaces.</li>
+    <li>drydock's tests need MuJoCo; OpenArm's example needs its setup script; neither is in CI.</li>
+    <li>A 12-bit field has no exact zero: compare packed values to a quantum, not to 0.</li>
+    <li>On a bus, a register answer and a feedback frame share the master id: ask for registers only when no commands are in flight.</li>
+  </ul>
+</article>
+
+    </main>
+  </div>
+
+  <footer>
+    <p class="note">keel and drydock, Apache-2.0. Every number in this book was measured on the code it describes, or worked out from the CAN standard where it says so.</p>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const chapters = [...document.querySelectorAll('article.chapter')];
+  const links = [...document.querySelectorAll('#chapters-nav a.ch')];
+  const byId = new Map(chapters.map((c, i) => [c.id, i]));
+  const title = (c) => c.querySelector('h1').textContent.trim();
+  const toc = document.getElementById('toc');
+  const modeBtn = document.getElementById('mode');
+  let onePage = false;
+  try { onePage = localStorage.getItem('book-one-page') === '1'; } catch (e) {}
+
+  // Previous and next at the foot of each chapter.
+  chapters.forEach((c, i) => {
+    const pager = document.createElement('nav');
+    pager.className = 'pager';
+    pager.setAttribute('aria-label', 'Previous and next');
+    const link = (j, cls, label) => {
+      const a = document.createElement('a');
+      a.className = cls; a.href = '#' + chapters[j].id;
+      a.innerHTML = '<small>' + label + '</small><span></span>';
+      a.querySelector('span').textContent = title(chapters[j]);
+      return a;
+    };
+    if (i > 0) pager.append(link(i - 1, 'prev', '← ' + chapters[i - 1].dataset.part));
+    if (i < chapters.length - 1) pager.append(link(i + 1, 'next', chapters[i + 1].dataset.part + ' →'));
+    c.append(pager);
+  });
+
+  function current() {
+    const id = location.hash.slice(1);
+    return byId.has(id) ? id : chapters[0].id;
+  }
+
+  function render(scroll) {
+    const id = current();
+    document.body.classList.toggle('one-page', onePage);
+    modeBtn.setAttribute('aria-pressed', String(onePage));
+    modeBtn.textContent = onePage ? 'Show one chapter' : 'Show as one page';
+    chapters.forEach((c) => { c.hidden = !onePage && c.id !== id; });
+    chapters.forEach((c) => c.querySelector('.pager').hidden = onePage);
+    links.forEach((a) => {
+      if (a.getAttribute('href') === '#' + id) a.setAttribute('aria-current', 'page');
+      else a.removeAttribute('aria-current');
+    });
+    document.title = title(chapters[byId.get(id)]) + ' · The keel book';
+    if (scroll) {
+      if (onePage) document.getElementById(id).scrollIntoView();
+      else window.scrollTo(0, 0);
+    }
+    if (window.matchMedia('(max-width: 720px)').matches && scroll) toc.open = false;
+  }
+
+  window.addEventListener('hashchange', () => render(true));
+  modeBtn.addEventListener('click', () => {
+    onePage = !onePage;
+    try { localStorage.setItem('book-one-page', onePage ? '1' : '0'); } catch (e) {}
+    render(true);
+  });
+  if (window.matchMedia('(max-width: 720px)').matches) toc.open = false;
+
+  // Search: every chapter's words, whatever is shown.
+  const search = document.getElementById('search');
+  const results = document.getElementById('results');
+  const nav = document.getElementById('chapters-nav');
+  const texts = chapters.map((c) => c.textContent.replace(/\s+/g, ' '));
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    results.replaceChildren();
+    if (!q) { results.hidden = true; nav.hidden = false; return; }
+    const terms = q.split(/\s+/);
+    const hits = chapters.map((c, i) => ({ c, i, t: texts[i], l: texts[i].toLowerCase() }))
+      .filter((h) => terms.every((t) => h.l.includes(t)));
+    for (const h of hits.slice(0, 12)) {
+      const at = h.l.indexOf(terms[0]);
+      const from = Math.max(0, at - 50);
+      const a = document.createElement('a');
+      a.href = '#' + h.c.id;
+      const name = document.createElement('span'); name.textContent = title(h.c);
+      const snip = document.createElement('small');
+      snip.textContent = (from > 0 ? '…' : '') + h.t.slice(from, at + 90) + '…';
+      a.append(name, snip);
+      results.append(a);
+    }
+    if (!hits.length) {
+      const p = document.createElement('p'); p.textContent = 'Nothing in the book says "' + search.value.trim() + '".';
+      results.append(p);
+    }
+    results.hidden = false; nav.hidden = true;
+  });
+  results.addEventListener('click', (e) => {
+    if (e.target.closest('a')) { search.value = ''; results.hidden = true; nav.hidden = false; }
+  });
+
+  render(false);
+  // A chapter's link opens on its page, header and contents in view, not
+  // scrolled down to it.
+  if (!onePage) window.addEventListener('load', () => window.scrollTo(0, 0));
+})();
+</script>
+<script src="runs/openarm-dead.js"></script>
+<script src="damiao.js"></script>
+<script src="viz.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+[package]
+name = "keel-book"
+version = "0.1.0"
+edition = "2021"
+description = "Turns recorded runs of keel and drydock, and robot models, into the data the book's figures draw"
+publish = false
+
+[dependencies]
+# keel's own readers, so the book reads recordings exactly as keel writes them.
+keel-record = { path = "../keel/crates/keel-record" }
+keel-control = { path = "../keel/crates/keel-control" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The robot file is drydock's YAML; the model, MuJoCo's XML.
+serde_yaml = "0.9"
+roxmltree = "0.20"
