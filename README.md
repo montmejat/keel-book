@@ -32,7 +32,7 @@ mkdir -p runs/openarm-dead
 
 # 1. The arm, its elbow dying 6 s in, every frame on the bus to a file.
 ../drydock/target/release/drydock ../drydock/examples/openarm/robot.yml \
-    --break openarm_joint4:dead@6 --trace runs/openarm-dead/bus.jsonl
+    --scenario ../drydock/examples/openarm/elbow-dies.scenario.yml --trace runs/openarm-dead/bus.jsonl
 
 # 2. In a second terminal: OpenArm's dataflow with a recorder.
 ../keel/target/release/keel run dataflows/openarm-recorded.yml | tee runs/openarm-dead/keel.log

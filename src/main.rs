@@ -112,10 +112,14 @@ fn run(dir: &Path, out: &str) -> Result<()> {
     }
 
     // The bus, frame by frame, and how busy it was.
-    let frames: Vec<Frame> = BufReader::new(fs::File::open(dir.join("bus.jsonl"))?)
-        .lines()
-        .map(|l| Ok(serde_json::from_str(&l?)?))
-        .collect::<Result<_>>()?;
+    // The trace's frames; its other lines say what drydock broke, and when.
+    let mut frames: Vec<Frame> = Vec::new();
+    for line in BufReader::new(fs::File::open(dir.join("bus.jsonl"))?).lines() {
+        let line = line?;
+        if line.contains("\"bus\":") {
+            frames.push(serde_json::from_str(&line)?);
+        }
+    }
     let mut busy: BTreeMap<u64, u64> = BTreeMap::new();
     for f in frames.iter().filter(|f| f.start_ns >= t0) {
         *busy.entry((f.start_ns - t0) / LOAD_WINDOW_NS).or_default() += f.end_ns - f.start_ns;

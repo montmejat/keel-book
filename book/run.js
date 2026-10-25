@@ -697,7 +697,7 @@
       title('vcan0 · CAN FD', 'One frame at a time; when two want it, the lower id wins. Arbitration at 1 Mbit/s, data at 5 Mbit/s, about 52 µs a frame.');
       rows([['busy', `${Math.round((busy / 100000) * 100)}% of the last 100 ms`], ['a cycle', '8 commands and 8 answers, 2 ms']], inspBody);
     } else if (sel.kind === 'dock') {
-      title('drydock', 'The robot: OpenArm’s model in MuJoCo, behind a SocketCAN bus, with Damiao’s motors answering as the real ones do, frame for frame. It ran with --break openarm_joint4:dead@6.');
+      title('drydock', 'The robot: OpenArm’s model in MuJoCo, behind a SocketCAN bus, with Damiao’s motors answering as the real ones do, frame for frame. It ran with the elbow-dies scenario: the elbow's drive dies six seconds in, for good.');
     }
   }
 

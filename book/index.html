@@ -233,7 +233,7 @@ cargo build
 ./target/debug/keel stop              <span class="c"># or Ctrl-C in the first terminal: the motors are disabled</span></pre>
   <p>Joint 1 swings ±0.4 rad every four seconds, joint 4 holds its bend at 1.64 rad (against gravity, with OpenArm's own gains), and the gripper motor goes between 0 and −1.03 rad every two seconds.</p>
   <div class="callout dock">
-    <p><strong>Try breaking it.</strong> Stop drydock and start it again with <code>--break openarm_joint4:dead@5</code>: five seconds in, the elbow's motor gives no torque. In <code>keel logs controller</code>, joint 4 drops to its stop at 2.44 rad. Nothing else reports it; see <a href="#faults">Encoders and faults</a>.</p>
+    <p><strong>Try breaking it.</strong> Stop drydock and start it again with <code>--scenario examples/openarm/elbow-dies.scenario.yml</code>: six seconds in, the elbow's motor gives no torque. In <code>keel logs controller</code>, joint 4 drops to its stop at 2.44 rad. Nothing else reports it; see <a href="#faults">Encoders and faults</a>.</p>
   </div>
   <h2>Next</h2>
   <p><a href="#map">The map</a> names what just ran. <a href="#cycle">One cycle, end to end</a> follows a single state and command through both projects.</p>
@@ -581,7 +581,7 @@ while let Event::Input { data, .. } = node.next_event()? {
     </table>
   </div>
   <div class="callout">
-    <p><strong>Agents and drydock.</strong> <code>examples/agent/run.sh</code> breaks a dataflow on purpose and asks an agent, through <code>keel-mcp</code> only, what's wrong. drydock's <code>--break</code> gives the same kind of exercise a robot: a dead motor, a frozen encoder. See <a href="#recipes">Recipes</a>.</p>
+    <p><strong>Agents and drydock.</strong> <code>examples/agent/run.sh</code> breaks a dataflow on purpose and asks an agent, through <code>keel-mcp</code> only, what's wrong. drydock's scenarios give the same kind of exercise a robot: a dead motor, a frozen encoder, at a set time or at random. See <a href="#recipes">Recipes</a>.</p>
   </div>
 </article>
 
@@ -605,7 +605,7 @@ while let Event::Input { data, .. } = node.next_event()? {
     </table>
   </div>
   <h2>Using it</h2>
-<pre class="code">drydock &lt;robot.yml&gt; [--lockstep &lt;hz&gt;] [--break &lt;joint&gt;:&lt;fault&gt;]...</pre>
+<pre class="code">drydock &lt;robot.yml&gt; [--scenario &lt;file&gt;] [--lockstep &lt;hz&gt;] [--trace &lt;file&gt;]</pre>
   <ul>
     <li><strong>The robot file</strong> names a MuJoCo scene and the buses that drive it: <a href="#robot-files">Robot files</a>.</li>
     <li><strong>In real time</strong> (the default), frames take as long as on a real bus; <strong>in lockstep</strong>, time follows the bus masters' cycles: <a href="#time">Time and the bus</a>.</li>
@@ -651,7 +651,7 @@ buses:
         master_id: 0x18
         transmission: { ratio: 0.042017, offset: 0.044 }
       - { joint: wrist, model: DM4310, id: 0x05, master_id: 0x15,
-          encoder: { noise: 0.0005, quantum: 0.0004 }, fault: freeze@10, timeout_ms: 100, peak_torque: 7 }</pre>
+          encoder: { noise: 0.0005, quantum: 0.0004 }, timeout_ms: 100, peak_torque: 7 }</pre>
   <h2>A bus</h2>
   <dl class="kv">
     <dt>can</dt><dd>the SocketCAN interface. One bus per arm is common; ids are per bus, so two arms may share them.</dd>
@@ -750,8 +750,12 @@ buses:
       </tbody>
     </table>
   </div>
-<pre class="code">fault: dead@10                                           <span class="c"># in the robot file: 10 simulated seconds in</span>
-drydock robot.yml --break elbow:freeze@10 --break wrist:weak <span class="c"># or on the command line</span></pre>
+<p>When, is a scenario's: a file beside the robot file, given with <code>--scenario</code>. A fault at a set time, to check what handles it; or at random, about every so often, as on a robot that's seen better days. Seeded: a run repeats.</p>
+<pre class="code">seed: 7
+faults:
+  - { joint: openarm_joint4, fault: dead, at: 6 s }                  <span class="c"># exactly then, for good</span>
+  - { joint: any, fault: freeze, every: 60 s, lasts: 500 ms }   <span class="c"># at random, then it recovers</span></pre>
+  <p>drydock says what it broke and when (<code>6.000 s: openarm_joint4 breaks: dead</code>), in its log and in <code>--trace</code>'s file, on the frames' clock: the answer key for a test, or for grading an agent.</p>
   <div class="callout dock">
     <p><strong>A broken motor says nothing.</strong> It keeps reporting itself enabled, as a dead drive or a frozen encoder does on a real robot. Noticing is the bus master's job: keel's joints loop compares what each joint is told with what it does, marks the joint's state, and says in its log "gives 0.0 N m of the -52.4 asked; +0.87 rad from its target" within a second of OpenArm's elbow dying.</p>
   </div>
@@ -913,7 +917,7 @@ drydock robot.yml --break elbow:freeze@10 --break wrist:weak <span class="c"># o
     <h1>A motor dies, replayed</h1>
     <p class="lede">OpenArm waving, until drydock kills the elbow's drive. What keel saw, joint by joint, and what it said.</p>
   </header>
-  <p>drydock ran with <code>--break openarm_joint4:dead@6</code>: six seconds after it started (5.3 s on this figure's clock, which starts at keel's first state), the elbow's drive stops giving torque. It goes on answering every command, on time, with its position and a torque of zero, as a drive whose power stage failed would. The bus doesn't notice: it stays 41% busy.</p>
+  <p>drydock ran with <code>--scenario examples/openarm/elbow-dies.scenario.yml</code>: six seconds after it started (5.3 s on this figure's clock, which starts at keel's first state), the elbow's drive stops giving torque. It goes on answering every command, on time, with its position and a torque of zero, as a drive whose power stage failed would. The bus doesn't notice: it stays 41% busy.</p>
   <div class="figure viz" id="fig-replay" data-viz="replay" data-run="openarm-dead">
     <p class="note">This figure is drawn by JavaScript: the whole run, joint by joint, with what keel-can's log said.</p>
   </div>
@@ -1001,7 +1005,7 @@ drydock robot.yml --break elbow:freeze@10 --break wrist:weak <span class="c"># o
   </ol>
   <h2>Break a motor, and see what keel sees</h2>
 <pre class="code"><span class="c"># drydock</span>
-./target/release/drydock examples/openarm/robot.yml --break openarm_joint4:dead@5
+./target/release/drydock examples/openarm/robot.yml --scenario examples/openarm/elbow-dies.scenario.yml
 <span class="c"># keel</span>
 ./target/debug/keel run examples/openarm.yml
 ./target/debug/keel logs arm              <span class="c"># "joint 4 (openarm_joint4): gives 0.0 N m of the -52.4 asked; +0.87 rad from its target (1.57)"</span></pre>
@@ -1035,7 +1039,7 @@ sudo ip link set can0 up
         <tr><td><code>a CAN FD frame to 0x001, but the motors are on classic CAN</code></td><td>the master is on CAN FD, the robot file isn't</td><td>make them agree</td></tr>
         <tr><td><code>N of M commands missed the 300µs deadline</code></td><td>the controller was late: a busy machine, no real-time settings</td><td>a few in hundreds is normal on a laptop; <code>rt:</code> in the dataflow, or a longer <code>--deadline-us</code></td></tr>
         <tr><td><code>busy 96% … waited up to 8.84 ms</code> (drydock)</td><td>the bus is nearly full: classic CAN at 500 Hz</td><td>CAN FD, a lower rate, or a second bus</td></tr>
-        <tr><td>a joint far from where it was told, no error anywhere</td><td>a motor broken on purpose (<code>--break</code>), or gains too low for the load</td><td>drydock's start lines list each motor's faults</td></tr>
+        <tr><td>a joint far from where it was told, no error anywhere</td><td>a motor broken on purpose (a scenario), or gains too low for the load</td><td>drydock's log says what it broke, and when</td></tr>
         <tr><td>OpenArm's <code>hold</code>: register answers missing, a position near −12.5 rad</td><td><code>openarm_can</code>'s <code>recv_all</code> reads late answers in the wrong mode</td><td><code>hold</code> lets answers settle during setup; a real-bus problem too</td></tr>
         <tr><td>keel's motors left enabled after a crash</td><td>a node killed with SIGKILL can't disable them</td><td>stop with <code>keel stop</code> or Ctrl-C; on hardware, a motor timeout (<code>timeout_ms</code>) is the safety net</td></tr>
       </tbody>
@@ -1071,7 +1075,8 @@ sudo ip link set can0 up
       <tbody>
         <tr><td><code>drydock &lt;robot.yml&gt;</code></td><td>the robot, in real time</td></tr>
         <tr><td><code>--lockstep &lt;hz&gt;</code></td><td>1/hz s of physics once every motor has had a frame; must be a whole number of the scene's timesteps</td></tr>
-        <tr><td><code>--break &lt;joint&gt;:&lt;fault&gt;[@s]</code></td><td>dead, weak, freeze, noisy; repeatable</td></tr>
+        <tr><td><code>--scenario &lt;file&gt;</code></td><td>what happens to it: dead, weak, freeze, noisy, at set times or at random (<code>examples/openarm/*.scenario.yml</code>)</td></tr>
+        <tr><td><code>--trace &lt;file&gt;</code></td><td>every frame across the bus, and every fault, on the machine's monotonic clock (real time)</td></tr>
         <tr><td><code>examples/openarm/hold [s] [--classic]</code></td><td>OpenArm driven by its own library (built as drydock's README says)</td></tr>
         <tr><td><code>cargo run --release --example wave -- &lt;robot.yml&gt; [--seconds s]</code></td><td>swings every motor on the first bus</td></tr>
       </tbody>
